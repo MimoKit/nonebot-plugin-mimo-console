@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <title>Mimo Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./assets/styles.css?v=0.4.4">
+</head>
+<body>
+  <div class="bg-glow glow-a"></div>
+  <div class="bg-glow glow-b"></div>
+
+  <section id="auth-screen" class="auth-screen">
+    <div class="auth-brand">
+      <div class="brand-mark" aria-hidden="true">M</div>
+      <h1>Mimo Console</h1>
+      <p>NoneBot2 管理面板 · 轻量、清晰、好用</p>
+    </div>
+    <div class="auth-card panel">
+      <div class="auth-mobile-brand">
+        <div class="brand-mark sm" aria-hidden="true">M</div>
+        <div><strong>Mimo</strong><span>Console</span></div>
+      </div>
+      <div class="auth-kicker" id="auth-step-label">登录</div>
+      <h2 id="auth-title">欢迎回来</h2>
+      <p id="auth-description" class="muted">使用管理员账号继续</p>
+      <form id="auth-form" autocomplete="on">
+        <label id="setup-token-field" class="field hidden">
+          <span>初始化令牌</span>
+          <input id="setup-token" type="password" autocomplete="one-time-code" placeholder="从 NoneBot 启动日志复制">
+        </label>
+        <label class="field">
+          <span>用户名</span>
+          <input id="username" name="username" autocomplete="username" placeholder="管理员用户名" required>
+        </label>
+        <label class="field">
+          <span>密码</span>
+          <div class="password-wrap">
+            <input id="password" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required>
+            <button id="toggle-password" class="icon-btn eye-btn" type="button" aria-label="显示密码"></button>
+          </div>
+          <small id="password-hint" class="hidden">至少 8 位，含大小写字母、数字和特殊符号</small>
+        </label>
+        <p id="auth-error" class="form-error" role="alert"></p>
+        <button id="auth-submit" class="btn btn-primary btn-block" type="submit">
+          <span>进入控制台</span>
+        </button>
+      </form>
+    </div>
+  </section>
+
+  <div id="app" class="app hidden">
+    <aside id="sidebar" class="sidebar">
+      <div class="brand-row">
+        <div class="brand-mark sm" aria-hidden="true">M</div>
+        <div class="brand-text">
+          <strong>Mimo</strong>
+          <span>Console</span>
+        </div>
+        <button id="sidebar-close" class="icon-btn sidebar-close" aria-label="关闭菜单"></button>
+      </div>
+
+      <nav class="nav-list" aria-label="主导航">
+        <button class="nav-item active" data-page="dashboard">
+          <span class="nav-ico dash"></span><span>概览</span>
+        </button>
+        <button class="nav-item" data-page="plugins">
+          <span class="nav-ico plug"></span><span>插件</span>
+          <em id="nav-plugin-count">0</em>
+        </button>
+        <button class="nav-item" data-page="config">
+          <span class="nav-ico gear"></span><span>配置</span>
+        </button>
+        <button class="nav-item" data-page="logs">
+          <span class="nav-ico logs"></span><span>日志</span>
+          <i class="live-dot"></i>
+        </button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="status-card">
+          <span class="pulse"></span>
+          <div>
+            <strong>NoneBot 在线</strong>
+            <small id="sidebar-uptime">已运行 --</small>
+          </div>
+        </div>
+        <div class="profile-row">
+          <div id="avatar" class="avatar">M</div>
+          <div class="profile-meta">
+            <strong id="profile-name">Admin</strong>
+            <span>管理员</span>
+          </div>
+          <button id="logout-button" class="icon-btn logout-btn" title="退出登录"></button>
+        </div>
+        <div class="version">Mimo Console · v0.2.0</div>
+      </div>
+    </aside>
+
+    <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
+
+    <main class="main">
+      <header class="topbar">
+        <button id="menu-button" class="icon-btn menu-btn" aria-label="打开菜单"></button>
+        <div class="crumb">
+          <span class="crumb-soft">控制台</span>
+          <strong id="page-crumb">概览</strong>
+        </div>
+        <div class="top-actions">
+          <span id="clock" class="clock"></span>
+          <button id="refresh-button" class="btn btn-ghost refresh-btn"><i></i><span>刷新</span></button>
+        </div>
+      </header>
+
+      <div class="content">
+        <!-- Dashboard -->
+        <section id="page-dashboard" class="page active">
+          <div class="hero panel">
+            <div>
+              <p class="hero-kicker" id="welcome-date">Mimo Console</p>
+              <h1><span id="greeting">早上好</span>，<b id="welcome-name">Admin</b></h1>
+              <p class="muted">查看运行状态、管理插件与配置。</p>
+            </div>
+            <div class="hero-pill"><span class="pulse"></span>运行中</div>
+          </div>
+
+          <div class="metric-grid">
+            <article class="metric panel">
+              <div class="metric-label"><span class="dot blue"></span>CPU</div>
+              <strong id="cpu-value">--%</strong>
+              <p id="cpu-sub">-- 核心</p>
+              <div class="bar"><i id="cpu-bar" style="width:0%"></i></div>
+            </article>
+            <article class="metric panel">
+              <div class="metric-label"><span class="dot violet"></span>内存</div>
+              <strong id="memory-value">--%</strong>
+              <p id="memory-sub">-- / --</p>
+              <div class="bar"><i id="memory-bar" style="width:0%"></i></div>
+            </article>
+            <article class="metric panel">
+              <div class="metric-label"><span class="dot cyan"></span>存储</div>
+              <strong id="disk-value">--%</strong>
+              <p id="disk-sub">-- / --</p>
+              <div class="bar"><i id="disk-bar" style="width:0%"></i></div>
+            </article>
+            <article class="metric panel">
+              <div class="metric-label"><span class="dot pink"></span>机器人</div>
+              <strong id="bot-value">0</strong>
+              <p id="bot-sub">0 个适配器</p>
+              <div class="bar"><i id="bot-bar" style="width:0%"></i></div>
+            </article>
+          </div>
+
+          <div class="dash-grid">
+            <article class="panel">
+              <div class="panel-head">
+                <h2>资源占用</h2>
+                <span class="chip">实时</span>
+              </div>
+              <div class="rings">
+                <div class="ring-item">
+                  <div id="cpu-ring" class="ring" style="--value:0"><span id="cpu-ring-value">0%</span></div>
+                  <strong>处理器</strong>
+                  <small id="cpu-ring-sub">-- 核心</small>
+                </div>
+                <div class="ring-item">
+                  <div id="memory-ring" class="ring violet" style="--value:0"><span id="memory-ring-value">0%</span></div>
+                  <strong>内存</strong>
+                  <small id="process-memory">进程 --</small>
+                </div>
+                <div class="ring-item">
+                  <div id="disk-ring" class="ring cyan" style="--value:0"><span id="disk-ring-value">0%</span></div>
+                  <strong>磁盘</strong>
+                  <small id="disk-free">剩余 --</small>
+                </div>
+              </div>
+              <div class="net-row">
+                <div><span class="net-tag up">↑</span><div><small>上传</small><strong id="network-sent">--</strong></div></div>
+                <div><span class="net-tag down">↓</span><div><small>下载</small><strong id="network-recv">--</strong></div></div>
+                <div><span class="net-tag host">◇</span><div><small>主机</small><strong id="hostname">--</strong></div></div>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head"><h2>运行信息</h2></div>
+              <div class="kv-list">
+                <div><span>NoneBot</span><strong id="nonebot-version">--</strong></div>
+                <div><span>Python</span><strong id="python-version">--</strong></div>
+                <div><span>系统</span><strong id="platform-value">--</strong></div>
+                <div><span>已加载插件</span><strong id="plugin-count">0</strong></div>
+                <div><span>事件响应器</span><strong id="matcher-count">0</strong></div>
+              </div>
+              <div id="bot-list" class="bot-list"><div class="empty-mini">暂无机器人连接</div></div>
+            </article>
+          </div>
+
+          <article class="panel recent-panel">
+            <div class="panel-head">
+              <h2>最近日志</h2>
+              <button class="link-btn" data-goto="logs">查看全部</button>
+            </div>
+            <div id="recent-logs" class="recent-logs">
+              <div class="empty-state compact">正在等待日志…</div>
+            </div>
+          </article>
+        </section>
+
+        <!-- Plugins -->
+        <section id="page-plugins" class="page">
+          <div class="page-head">
+            <div>
+              <h1>插件中心</h1>
+              <p class="muted">管理已加载插件，浏览官方商店详情</p>
+            </div>
+            <div class="stat-box">
+              <strong id="plugin-total">0</strong>
+              <span>已加载</span>
+            </div>
+          </div>
+
+          <div class="tabs panel">
+            <button class="tab active" data-plugin-tab="installed" role="tab">
+              已加载 <em id="loaded-tab-count">0</em>
+            </button>
+            <button class="tab" data-plugin-tab="store" role="tab">
+              官方商店 <em id="store-tab-count">—</em>
+            </button>
+            <a class="tab-link" href="https://nonebot.dev/store/plugins" target="_blank" rel="noreferrer">NoneBot 商店 ↗</a>
+          </div>
+
+          <div class="toolbar panel">
+            <label class="search">
+              <i></i>
+              <input id="plugin-search" autocomplete="off" placeholder="搜索已加载插件">
+            </label>
+            <label id="official-filter" class="switch hidden">
+              <input id="official-only" type="checkbox">
+              <span></span>
+              仅官方
+            </label>
+            <div class="view-toggle">
+              <button class="active" data-view="grid" title="网格">▦</button>
+              <button data-view="list" title="列表">☰</button>
+            </div>
+          </div>
+
+          <div id="plugin-result-meta" class="result-meta"></div>
+          <div id="plugin-grid" class="plugin-grid"></div>
+          <div id="store-pagination" class="pager hidden">
+            <button id="store-prev" class="btn btn-ghost">上一页</button>
+            <span id="store-page-label">第 1 / 1 页</span>
+            <button id="store-next" class="btn btn-ghost">下一页</button>
+          </div>
+        </section>
+
+        <!-- Config -->
+        <section id="page-config" class="page">
+          <div class="page-head">
+            <div>
+              <h1>运行配置</h1>
+              <p class="muted">编辑环境变量，保存后需重启生效</p>
+            </div>
+            <span id="config-path" class="path-pill">正在读取…</span>
+          </div>
+          <div class="notice">
+            <span class="dot yellow"></span>
+            <strong>保存后请重启 NoneBot 使配置生效</strong>
+          </div>
+          <div class="toolbar panel">
+            <label class="search">
+              <i></i>
+              <input id="config-search" placeholder="搜索配置项">
+            </label>
+            <button id="add-config" class="btn btn-secondary">＋ 新增</button>
+          </div>
+          <div id="config-groups" class="config-groups"></div>
+          <div id="save-bar" class="save-bar">
+            <div><span class="dot yellow"></span>有未保存的修改</div>
+            <button id="discard-config" class="btn btn-ghost">放弃</button>
+            <button id="save-config" class="btn btn-primary">保存配置</button>
+          </div>
+        </section>
+
+        <!-- Logs -->
+        <section id="page-logs" class="page">
+          <div class="page-head">
+            <div>
+              <h1>运行日志</h1>
+              <p class="muted">实时查看本次进程日志</p>
+            </div>
+            <div class="log-live"><span class="pulse"></span>实时更新</div>
+          </div>
+          <div class="toolbar panel log-toolbar">
+            <label class="search grow">
+              <i></i>
+              <input id="log-search" placeholder="搜索日志内容">
+            </label>
+            <select id="log-level" class="select">
+              <option value="ALL">全部级别</option>
+              <option>DEBUG</option>
+              <option>INFO</option>
+              <option>SUCCESS</option>
+              <option>WARNING</option>
+              <option>ERROR</option>
+              <option>CRITICAL</option>
+            </select>
+            <button id="log-follow" class="btn btn-secondary active">自动滚动</button>
+            <button id="clear-logs" class="btn btn-danger">清空</button>
+          </div>
+          <div class="terminal panel">
+            <div class="terminal-head">
+              <div class="win-dots"><i></i><i></i><i></i></div>
+              <span>nonebot.log</span>
+              <em id="log-count">0 条</em>
+            </div>
+            <div id="log-lines" class="log-lines">
+              <div class="empty-state">暂时没有日志</div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Add config modal -->
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-card panel">
+      <div class="modal-head">
+        <h2>新增配置</h2>
+        <button id="modal-close" class="icon-btn close-btn" aria-label="关闭"></button>
+      </div>
+      <label class="field"><span>配置键</span><input id="new-config-key" placeholder="例如 MY_PLUGIN_ENABLED"></label>
+      <label class="field"><span>配置值</span><input id="new-config-value" placeholder="请输入配置值"></label>
+      <p id="modal-error" class="form-error"></p>
+      <div class="modal-actions">
+        <button id="modal-cancel" class="btn btn-ghost">取消</button>
+        <button id="modal-confirm" class="btn btn-primary">添加</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Plugin detail drawer -->
+  <div id="detail-drawer" class="drawer hidden" role="dialog" aria-modal="true" aria-labelledby="detail-title">
+    <div class="drawer-backdrop" id="detail-backdrop"></div>
+    <aside class="drawer-panel panel">
+      <div class="drawer-head">
+        <div class="drawer-title-row">
+          <div id="detail-avatar" class="plugin-avatar lg">P</div>
+          <div class="min-0">
+            <div class="drawer-badges" id="detail-badges"></div>
+            <h2 id="detail-title">插件详情</h2>
+            <p id="detail-module" class="mono muted"></p>
+          </div>
+        </div>
+        <button id="detail-close" class="icon-btn close-btn" aria-label="关闭"></button>
+      </div>
+      <div class="drawer-body" id="detail-body">
+        <div class="empty-state">加载中…</div>
+      </div>
+      <div class="drawer-foot" id="detail-actions"></div>
+    </aside>
+  </div>
+
+  <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
+  <script src="./assets/app.js?v=0.3.0" defer></script>
+</body>
+</html>

@@ -1,141 +1,89 @@
 <div align="center">
-    <a href="https://v2.nonebot.dev/store">
-    <img src="https://raw.githubusercontent.com/fllesser/nonebot-plugin-template/refs/heads/resource/.docs/NoneBotPlugin.svg" width="310" alt="logo"></a>
+  <a href="https://nonebot.dev/store/plugins">
+    <img src="https://raw.githubusercontent.com/fllesser/nonebot-plugin-template/refs/heads/resource/.docs/NoneBotPlugin.svg" width="310" alt="NoneBot Plugin">
+  </a>
 
-## ✨ nonebot-plugin-template ✨
-[![python](https://img.shields.io/badge/python-3.10|3.11|3.12|3.13|3.14-blue.svg)](https://www.python.org)
-[![uv](https://img.shields.io/badge/package%20manager-uv-black?style=flat-square&logo=uv)](https://github.com/astral-sh/uv)
-<br/>
-[![ruff](https://img.shields.io/badge/code%20style-ruff-black?style=flat-square&logo=ruff)](https://github.com/astral-sh/ruff)
-[![pre-commit](https://results.pre-commit.ci/badge/github/fllesser/nonebot-plugin-template/master.svg)](https://results.pre-commit.ci/latest/github/fllesser/nonebot-plugin-template/master)
-[![codecov](https://codecov.io/gh/fllesser/nonebot-plugin-template/graph/badge.svg?token=TMR6QZ6C6I)](https://codecov.io/gh/fllesser/nonebot-plugin-template)
+# Mimo Console
+
+随 NoneBot2 运行的玻璃风 WebUI 管理面板。
+
+[![PyPI](https://img.shields.io/pypi/v/nonebot-plugin-mimo-console.svg)](https://pypi.org/project/nonebot-plugin-mimo-console/)
+[![Python](https://img.shields.io/badge/Python-3.10%20--%203.14-3776ab?logo=python&logoColor=white)](https://www.python.org/)
+[![CI](https://github.com/MimoKit/nonebot-plugin-mimo-console/actions/workflows/ci.yml/badge.svg)](https://github.com/MimoKit/nonebot-plugin-mimo-console/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-GPLv3-6b7280.svg)](./LICENSE)
 
 </div>
 
-> [!IMPORTANT]
-> **收藏项目** 以便创建插件仓库～⭐️
+## 能做什么
 
-<img width="100%" src="https://starify.komoridevs.icu/api/starify?owner=fllesser&repo=nonebot-plugin-template" alt="starify" />
+- 查看 CPU、内存、磁盘、网络、进程占用和运行时间。
+- 查看当前连接的 Bot、适配器和已加载插件。
+- 搜索 NoneBot 官方插件商店，安装、更新或卸载插件。
+- 在网页中修改 dotenv 配置，敏感字段自动脱敏，保存前自动备份。
+- 搜索和筛选当前进程日志。
+- 使用初始化令牌创建管理员，后续通过账号密码登录。
 
-### 不要 fork ! 不要 fork ! 不要 fork !
+前端资源随插件一起安装，不依赖单独的 Web 服务，也不绑定任何消息适配器。
 
-### 🎉 快速开始
+## 安装
 
-1. 点击 [创建仓库](https://github.com/new?template_owner=fllesser&template_name=nonebot-plugin-template&owner=%40me&name=nonebot-plugin-&visibility=public)
-2. **⚠️ 重要:** 前往仓库 `Settings` -> `Actions` -> `General` -> 最下方 `Workflow permissions`, 勾选 `Read and write permissions`，然后点击 `Save` 按钮
-3. 在 `Add file` 菜单中选择 `Create new file`, 在新文件名处输入`LICENSE`, 此时在右侧会出现一个 `Choose a license template` 按钮, 点击此按钮选择开源协议模板, 然后在最下方提交新文件到主分支(这会触发一个工作流，生成新的 `README`，并修改 `pyproject.toml` 等文件中的插件名称)
+使用 NB-CLI：
 
-> [!NOTE]
-> 模板库中自带了一个 Release 工作流, 你可以使用此工作流发布你的插件到 PyPI
+```bash
+nb plugin install nonebot-plugin-mimo-console
+```
 
-<details>
-<summary>配置 PyPI Trusted Publisher</summary>
-配置文档: https://docs.pypi.org/trusted-publishers/adding-a-publisher/ 
+或使用 uv / pip：
 
- - PyPI Project Name: nonebot-plugin-template
- - Owner: Your GitHub username
- - Repository name: nonebot-plugin-template
- - Workflow name: release.yml
- - Environment name: release
+```bash
+uv add nonebot-plugin-mimo-console
+# pip install nonebot-plugin-mimo-console
+```
 
-</details>
+项目需要启用 FastAPI 驱动：
 
-<details>
-<summary>使用 bump-my-version 工具更新版本号，并触发 Release 工作流 (推荐)</summary>
+```dotenv
+DRIVER=~fastapi
+```
 
-`bump-my-version` 和 `poethepoet` 在 dev 依赖组中，使用 `uv sync` 安装，或者使用 `uv tool install` 全局安装
+启动 NoneBot 后，日志会显示 WebUI 地址和首次初始化令牌。默认地址：
 
-    uv run poe bump patch
+```text
+http://127.0.0.1:8080/mimo-console/
+```
 
-该操作会有以下行为:
-1. 更新 `pyproject.toml` 中 `project.version` 和 `tool.bumpversion.current_version`
-2. 更新 `uv.lock` 中的版本号
-3. 创建一个带 `tag` 的提交, 提交信息可以在 `pyproject.toml` 中的 `[tool.bumpversion]` 中配置
+第一次打开时输入日志中的令牌并创建管理员；完成初始化后只需使用管理员账号登录。
 
-接下来你只需要推送提交，并推送 `tag` (git push origin --tags) 即可触发 Release 工作流
+## 配置
 
-</details>
+所有配置均可省略。
 
-<details>
-<summary>触发 Release 工作流 (手动)</summary>
+| 配置项 | 默认值 | 作用 |
+| --- | --- | --- |
+| `MIMO_CONSOLE_PATH` | `/mimo-console` | WebUI 挂载路径 |
+| `MIMO_CONSOLE_PROJECT_ROOT` | 当前工作目录 | NoneBot 项目目录 |
+| `MIMO_CONSOLE_SESSION_HOURS` | `72` | 登录有效时长，范围 1-720 小时 |
+| `MIMO_CONSOLE_ENABLE_STORE` | `true` | 显示官方插件商店 |
+| `MIMO_CONSOLE_ALLOW_PACKAGE_MANAGEMENT` | `true` | 允许安装、更新和卸载插件 |
+| `MIMO_CONSOLE_STORE_CACHE_SECONDS` | `600` | 商店数据缓存时间 |
+| `MIMO_CONSOLE_PACKAGE_TIMEOUT` | `300` | 插件操作超时时间（秒） |
 
-更新版本号 
+超级用户也可以发送 `mimo控制台` 或 `NoneBot控制台` 获取访问地址。
 
-    uv version --bump patch
-    
-possible values: major, minor, patch, stable, alpha, beta, rc, post, dev
+## 数据与安全
 
-提交并推送...
+- 管理员数据由 `nonebot-plugin-localstore` 保存，不会写进插件安装目录。
+- Token、Secret、Password、Cookie、API Key 等配置值默认脱敏。
+- 配置修改会生成备份，重启 NoneBot 后生效。
+- 公网部署建议在反向代理层启用 HTTPS 和额外访问限制。
 
-从本地推送任意 `tag` 即可触发。
+## 本地开发
 
-创建 `tag`:
+```bash
+uv sync --all-groups
+uv run poe test
+uv run ruff check .
+uv build
+```
 
-    git tag v*
-
-推送本地所有 `tag`:
-
-    git push origin --tags
-
-</details>
-
-> [!IMPORTANT]
-> 不会使用 uv ？
-
-<details>
-<summary>不会看文档去</summary>
-
-<details>
-<summary>安装 uv </summary>
-
-`windows`:
-
-    powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-`curl`:
-
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-`pipx`:
-
-    pipx install uv
-    
-</details>
-
-安装所有依赖(自动创建 `venv` 虚拟环境, `-p` 指定 `python` 版本):
-
-    uv sync --all-groups -p 3.12
-添加其他依赖, 例如 `koishi`(bushi
-
-    uv add koishi
-[uv 文档](https://astral.sh/blog/uv)
-</details>
-
-> [!NOTE]
-> pre-commit / prek 使用方法
-
-<details>
-<summary>提交前检查</summary>
-
-安装 `pre-commit`
-
-    uv tool install pre-commit
-
-或安装 `prek` (推荐)
-
-On `Linux` / `macOS`:
-
-    curl --proto '=https' --tlsv1.2 -LsSf https://github.com/j178/prek/releases/download/v0.2.13/prek-installer.sh | sh
-On `Windows`:
-
-    powershell -ExecutionPolicy ByPass -c "irm https://github.com/j178/prek/releases/download/v0.2.13/prek-installer.ps1 | iex"
-安装钩子
-
-    pre-commit install
-
-    prek install
-添加到暂存区
-
-    git add <待提交文件>
-
-仓库地址: 
-- [`prek`](https://github.com/j178/prek)
-</details>
+项目使用 GPL-3.0 协议。
