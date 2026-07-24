@@ -40,9 +40,11 @@ def is_newer(latest: str, current: str) -> bool:
         return False
     try:
         from packaging.version import InvalidVersion, Version
-
+    except ImportError:
+        return latest != current
+    try:
         return Version(latest) > Version(current)
-    except (InvalidVersion, ImportError, ValueError):
+    except (InvalidVersion, ValueError):
         return latest != current
 
 
