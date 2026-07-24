@@ -257,9 +257,7 @@ def create_router(state: ConsoleState) -> APIRouter:
         return {"source": "default", "url": state.background.default_url}
 
     @router.get("/api/background")
-    async def get_background(
-        session: Annotated[Session, Depends(require_session)],
-    ) -> dict[str, Any]:
+    async def get_background() -> dict[str, Any]:
         return background_payload(await asyncio.to_thread(state.background.snapshot))
 
     @router.put("/api/background")

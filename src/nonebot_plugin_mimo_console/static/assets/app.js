@@ -123,6 +123,7 @@ async function bootstrap() {
   bindEvents();
   updateClock();
   setInterval(updateClock, 1000);
+  loadBackground();
   try {
     const authStatus = await api("/auth/status");
     setAuthMode(authStatus.configured);
@@ -241,7 +242,7 @@ async function signOut(requestLogout) {
   closeDetail();
   state.token = "";
   localStorage.removeItem(storageKey);
-  applyBackground({ source: "default", url: "" });
+  loadBackground();
   $("#app").classList.add("hidden");
   $("#auth-screen").classList.remove("hidden");
   $("#password").value = "";
