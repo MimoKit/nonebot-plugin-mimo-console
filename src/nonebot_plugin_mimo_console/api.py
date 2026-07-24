@@ -1,4 +1,6 @@
 import asyncio
+import os
+import signal
 import time
 from collections import defaultdict, deque
 from typing import Annotated, Any, Literal
@@ -14,7 +16,8 @@ from .env_editor import locate_env_file, read_env, update_env
 from .runtime import dashboard_snapshot, plugin_snapshot
 from .security import AuthError, Session
 from .state import ConsoleState
-from .store import StoreError
+from .store import StoreError, _clean_output, build_nb_command
+from .version import PACKAGE_NAME, get_installed_version
 
 
 class SetupBody(BaseModel):
@@ -303,6 +306,64 @@ def create_router(state: ConsoleState) -> APIRouter:
         except BackgroundError:
             raise HTTPException(status_code=404, detail="背景图片不存在") from None
         return FileResponse(path)
+
+    @router.get("/api/system/version")
+    async def system_version(
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        await state.release_cache.fetch()
+        return state.release_cache.snapshot(get_installed_version())
+
+    @router.post("/api/system/update")
+    async def system_update(
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        if state.store.action_lock.locked():
+            raise HTTPException(status_code=409, detail="另一个插件操作仍在进行中")
+        command = build_nb_command(state.config.project_root(), "update", PACKAGE_NAME)
+        env = os.environ.copy()
+        env.update({"NO_COLOR": "1", "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
+        async with state.store.action_lock:
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                cwd=state.config.project_root(),
+                env=env,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            try:
+                output, _ = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=state.config.mimo_console_package_timeout,
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                raise HTTPException(
+                    status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                    detail=f"更新超过 {state.config.mimo_console_package_timeout} 秒，已终止",
+                ) from None
+        clean = _clean_output(output)
+        if process.returncode != 0:
+            logger.warning("[Mimo Console] 自更新失败")
+            raise HTTPException(
+                status_code=400,
+                detail=clean or f"更新失败（{process.returncode}）",
+            )
+        logger.success("[Mimo Console] 已完成自更新，需要重启")
+        return {"ok": True, "restart_required": True, "output": clean}
+
+    @router.post("/api/system/restart")
+    async def restart_nonebot(
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        # 延迟发出 SIGINT，让响应先返回；nonebot/uvicorn 优雅退出后，
+        # 由外部进程管理器（systemd / MCSManager autoRestart / pm2 / Docker 等）拉起。
+        # 若进程未被托管，本次退出后不会自动重启。
+        asyncio.get_running_loop().call_later(1.5, lambda: os.kill(os.getpid(), signal.SIGINT))
+        logger.warning("[Mimo Console] 收到重启请求，进程即将退出")
+        return {"ok": True, "restart_required": True}
 
     index = state.static_dir / "index.html"
 
