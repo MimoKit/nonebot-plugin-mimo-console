@@ -90,3 +90,5 @@ uv build
 ```
 
 项目使用 GPL-3.0 协议。
+## 致谢
+>感谢[M](https://github.com/yiwuerxin) 
