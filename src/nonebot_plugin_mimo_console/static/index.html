@@ -79,6 +79,9 @@
           <span class="nav-ico logs"></span><span>日志</span>
           <i class="live-dot"></i>
         </button>
+        <button class="nav-item" data-page="appearance">
+          <span class="nav-ico bg"></span><span>外观</span>
+        </button>
       </nav>
 
       <div class="sidebar-foot">
@@ -320,6 +323,67 @@
             <div id="log-lines" class="log-lines">
               <div class="empty-state">暂时没有日志</div>
             </div>
+          </div>
+        </section>
+
+        <!-- Appearance -->
+        <section id="page-appearance" class="page">
+          <div class="page-head">
+            <div>
+              <h1>外观</h1>
+              <p class="muted">自定义 WebUI 背景图，支持远程链接或本地图片</p>
+            </div>
+            <span id="bg-status-pill" class="path-pill">当前：默认背景</span>
+          </div>
+
+          <div class="notice">
+            <span class="dot yellow"></span>
+            <strong>自定义背景立即生效、无需重启；仅对当前管理员可见。</strong>
+          </div>
+
+          <div class="appearance-grid">
+            <article class="panel">
+              <div class="panel-head"><h2>预览</h2><span class="chip" id="bg-source-chip">默认背景</span></div>
+              <div id="bg-preview" class="bg-preview empty"></div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head"><h2>背景来源</h2></div>
+              <div class="bg-modes">
+                <label class="bg-mode">
+                  <input type="radio" name="bg-mode" value="default" id="bg-mode-default" checked>
+                  <span class="bg-mode-text"><strong>默认背景</strong><small>使用内置背景图</small></span>
+                </label>
+                <label class="bg-mode">
+                  <input type="radio" name="bg-mode" value="url" id="bg-mode-url">
+                  <span class="bg-mode-text"><strong>远程链接</strong><small>填入 http/https 图片地址</small></span>
+                </label>
+                <label class="bg-mode">
+                  <input type="radio" name="bg-mode" value="upload" id="bg-mode-upload">
+                  <span class="bg-mode-text"><strong>本地上传</strong><small>上传 jpg/png/webp/gif，≤ 5MB</small></span>
+                </label>
+              </div>
+
+              <div id="bg-url-field" class="bg-field hidden">
+                <label class="field">
+                  <span>图片 URL</span>
+                  <input id="bg-url-input" type="text" autocomplete="off" placeholder="https://example.com/wallpaper.jpg">
+                </label>
+                <button id="bg-url-save" class="btn btn-primary" type="button">应用链接</button>
+              </div>
+
+              <div id="bg-upload-field" class="bg-field hidden">
+                <button class="file-drop" id="bg-file-label" type="button">
+                  <strong>点击选择图片</strong>
+                  <small>支持 jpg / jpeg / png / webp / gif，单张不超过 5MB</small>
+                </button>
+                <input id="bg-file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden>
+              </div>
+
+              <div class="bg-actions">
+                <button id="bg-reset" class="btn btn-ghost" type="button">恢复默认</button>
+              </div>
+            </article>
           </div>
         </section>
       </div>

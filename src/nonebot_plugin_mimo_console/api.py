@@ -3,12 +3,13 @@ import time
 from collections import defaultdict, deque
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from nonebot import get_driver, logger
 from pydantic import BaseModel, Field
 
+from .background import MAX_BACKGROUND_BYTES, BackgroundError
 from .env_editor import locate_env_file, read_env, update_env
 from .runtime import dashboard_snapshot, plugin_snapshot
 from .security import AuthError, Session
@@ -29,6 +30,10 @@ class LoginBody(BaseModel):
 
 class ConfigUpdateBody(BaseModel):
     values: dict[str, str]
+
+
+class BackgroundUrlBody(BaseModel):
+    url: str = Field(min_length=1, max_length=2048)
 
 
 class PluginActionBody(BaseModel):
@@ -235,6 +240,69 @@ def create_router(state: ConsoleState) -> APIRouter:
     ) -> dict[str, bool]:
         state.logs.clear()
         return {"ok": True}
+
+    def background_payload(snap: dict[str, Any]) -> dict[str, Any]:
+        if snap["type"] == "url":
+            return {"source": "url", "url": snap["url"]}
+        if snap["type"] == "upload" and snap["filename"]:
+            return {
+                "source": "upload",
+                "url": f"{state.config.mimo_console_path}/api/background/file/{snap['filename']}",
+            }
+        return {"source": "default", "url": state.background.default_url}
+
+    @router.get("/api/background")
+    async def get_background(
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        return background_payload(await asyncio.to_thread(state.background.snapshot))
+
+    @router.put("/api/background")
+    async def set_background_url(
+        body: BackgroundUrlBody,
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        try:
+            snap = await asyncio.to_thread(state.background.set_url, body.url)
+        except BackgroundError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return background_payload(snap)
+
+    @router.post("/api/background/upload")
+    async def upload_background(
+        session: Annotated[Session, Depends(require_session)],
+        file: UploadFile,
+    ) -> dict[str, Any]:
+        data = await file.read()
+        if len(data) > MAX_BACKGROUND_BYTES:
+            raise HTTPException(status_code=413, detail="图片大小不能超过 5MB")
+        try:
+            snap = await asyncio.to_thread(
+                state.background.set_upload,
+                file.filename or "",
+                file.content_type or "",
+                data,
+            )
+        except BackgroundError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return background_payload(snap)
+
+    @router.delete("/api/background")
+    async def clear_background(
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, bool]:
+        await asyncio.to_thread(state.background.clear)
+        return {"ok": True}
+
+    @router.get("/api/background/file/{filename}")
+    async def serve_background_file(filename: str) -> FileResponse:
+        # 该路由不要求登录态：CSS `background: url(...)` 请求无法附带
+        # Authorization 头，靠不可猜的随机文件名 + 目录隔离保护。
+        try:
+            path = await asyncio.to_thread(state.background.resolve_file, filename)
+        except BackgroundError:
+            raise HTTPException(status_code=404, detail="背景图片不存在") from None
+        return FileResponse(path)
 
     index = state.static_dir / "index.html"
 
