@@ -26,6 +26,7 @@ const state = {
   detailPlugin: null,
   detailSource: null,
   background: { source: "default", url: "" },
+  version: null,
 };
 
 const $ = (selector, context = document) => context.querySelector(selector);
@@ -171,6 +172,10 @@ function bindEvents() {
   $("#bg-file-input").addEventListener("change", (event) => uploadBgFile(event.target));
   $("#bg-reset").addEventListener("click", resetBg);
   $("#bg-file-label").addEventListener("click", () => $("#bg-file-input").click());
+  $("#restart-button").addEventListener("click", restartNonebot);
+  $("#version-update-btn").addEventListener("click", () => {
+    if (state.version && state.version.has_update) openUpdateConfirm(state.version);
+  });
   $$(".view-toggle button").forEach((button) => button.addEventListener("click", () => {
     $$(".view-toggle button").forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
@@ -227,7 +232,7 @@ function enterApp(username) {
   clearTimers();
   state.timers.push(setInterval(() => loadDashboard(false), 5000));
   state.timers.push(setInterval(loadLogs, 2000));
-  Promise.allSettled([loadDashboard(), loadPlugins(), loadLogs(), loadBackground()]);
+  Promise.allSettled([loadDashboard(), loadPlugins(), loadLogs(), loadBackground(), loadVersion()]);
 }
 
 async function signOut(requestLogout) {
@@ -1028,6 +1033,73 @@ async function resetBg() {
   } finally {
     button.disabled = false;
   }
+}
+
+async function loadVersion() {
+  try {
+    state.version = await api("/system/version");
+    renderVersion(state.version);
+  } catch (_) { /* 版本检测失败不影响使用 */ }
+}
+
+function renderVersion(data) {
+  $("#version-current").textContent = data.current ? `v${data.current}` : "--";
+  const button = $("#version-update-btn");
+  if (data.has_update && data.latest) {
+    $("#version-latest").textContent = `v${data.latest}`;
+    button.classList.remove("hidden");
+  } else {
+    button.classList.add("hidden");
+  }
+}
+
+async function openUpdateConfirm(data) {
+  if (!window.confirm(`更新到 v${data.latest}？将通过 nb plugin update 拉取最新版，完成后需要重启 NoneBot。`)) return;
+  const button = $("#version-update-btn");
+  const original = button.innerHTML;
+  button.disabled = true;
+  button.textContent = "更新中…";
+  try {
+    await api("/system/update", { method: "POST" });
+    toast("已更新，正在重启…", "warning");
+    pollRestart();
+  } catch (error) {
+    toast(error.message, "error");
+    button.innerHTML = original;
+    button.disabled = false;
+  }
+}
+
+async function restartNonebot() {
+  if (!window.confirm("确定重启 NoneBot？进程将退出，并由外部进程管理器重新拉起。未保存的操作会丢失。")) return;
+  const button = $("#restart-button");
+  button.disabled = true;
+  try {
+    await api("/system/restart", { method: "POST" });
+    toast("已发送重启信号，正在退出…", "warning");
+    pollRestart();
+  } catch (error) {
+    toast(error.message, "error");
+    button.disabled = false;
+  }
+}
+
+async function pollRestart() {
+  // 进程退出后接口不可达，轮询 /api/health 直到外部管理器重新拉起
+  for (let attempt = 0; attempt < 60; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    try {
+      const response = await fetch(`${rootPath}/api/health`, {
+        headers: state.token ? { Authorization: `Bearer ${state.token}` } : {},
+      });
+      if (response.ok) {
+        toast("NoneBot 已重新上线");
+        location.reload();
+        return;
+      }
+    } catch (_) { /* 进程尚未拉起，继续等待 */ }
+  }
+  toast("重启后长时间未恢复，请手动检查进程与外部管理器", "error");
 }
 
 bootstrap();

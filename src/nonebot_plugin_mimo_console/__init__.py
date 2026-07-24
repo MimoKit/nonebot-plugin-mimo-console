@@ -15,6 +15,7 @@ from .log_buffer import LogBuffer
 from .security import AuthStore
 from .state import ConsoleState
 from .store import PluginStore
+from .version import LatestReleaseCache
 
 require("nonebot_plugin_localstore")
 import nonebot_plugin_localstore as localstore  # noqa: E402,I001
@@ -54,6 +55,7 @@ console_state = ConsoleState(
         image_dir=localstore.get_plugin_data_dir() / "backgrounds",
         default_url=console_config.mimo_console_background_url,
     ),
+    release_cache=LatestReleaseCache(),
 )
 
 app = get_app()

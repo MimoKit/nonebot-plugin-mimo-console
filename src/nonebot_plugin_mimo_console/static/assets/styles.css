@@ -1880,3 +1880,22 @@ a { color: inherit; text-decoration: none; }
 .file-drop strong { font-size: 14px; color: var(--text); }
 .file-drop small { color: var(--muted); font-size: 12px; }
 .file-drop:hover { border-color: var(--primary-strong); }
+
+/* hero 版本信息 + 重启按钮 */
+.hero-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+.hero-version {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.hero-version .version-label { font-size: 12px; color: var(--muted); }
+.hero-version strong { font-size: 14px; color: var(--text); }
+.hero-status { display: flex; align-items: center; gap: 8px; }
+.btn-sm { padding: 6px 12px; font-size: 13px; border-radius: 10px; }

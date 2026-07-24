@@ -22,6 +22,7 @@
 - 在网页中修改 dotenv 配置，敏感字段自动脱敏，保存前自动备份。
 - 搜索和筛选当前进程日志。
 - 自定义 WebUI 背景图，支持远程链接或本地上传。
+- 检测 GitHub 最新版本并一键更新，概览页支持重启 NoneBot。
 - 使用初始化令牌创建管理员，后续通过账号密码登录。
 
 前端资源随插件一起安装，不依赖单独的 Web 服务，也不绑定任何消息适配器。
@@ -71,6 +72,12 @@ http://127.0.0.1:8080/mimo-console/
 | `MIMO_CONSOLE_BACKGROUND_URL` | 空 | 默认背景图的远程 URL（可选，http/https）；运行时也可在外观页修改 |
 
 超级用户也可以发送 `mimo控制台` 或 `NoneBot控制台` 获取访问地址。
+
+## 版本更新与重启
+
+- 概览页显示当前版本，并与 GitHub 最新 release 比对，有新版时可一键通过 `nb plugin update` 自更新（结果缓存约 30 分钟）。
+- 更新与修改配置一样，需要重启 NoneBot 才能生效。
+- 概览页的「重启」按钮会发送 `SIGINT` 让进程优雅退出，**需要 NoneBot 进程由外部进程管理器托管**（systemd / MCSManager autoRestart / pm2 / Docker `restart=always` 等）才会自动重新拉起；未托管时进程会停止。
 
 ## 数据与安全
 
