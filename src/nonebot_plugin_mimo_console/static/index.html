@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./assets/styles.css?v=0.4.4">
+  <link rel="stylesheet" href="./assets/styles.css?v=0.5.1">
 </head>
 <body>
   <div class="bg-glow glow-a"></div>
@@ -129,17 +129,11 @@
               <p class="muted">查看运行状态、管理插件与配置。</p>
             </div>
             <div class="hero-side">
-              <div class="hero-version">
-                <span class="version-label">控制台版本</span>
-                <strong id="version-current">--</strong>
-                <button class="btn btn-secondary btn-sm hidden" id="version-update-btn" type="button">
-                  更新到 <span id="version-latest"></span>
-                </button>
-              </div>
-              <div class="hero-status">
-                <div class="hero-pill"><span class="pulse"></span>运行中</div>
-                <button id="restart-button" class="btn btn-ghost btn-sm" type="button" title="重启 NoneBot 进程">重启</button>
-              </div>
+              <span class="version-label">控制台版本</span>
+              <strong id="version-current">--</strong>
+              <div class="hero-pill"><span class="pulse"></span>运行中</div>
+              <button class="btn btn-secondary btn-sm" id="check-update-btn" type="button">检测更新</button>
+              <button id="restart-button" class="btn btn-ghost btn-sm" type="button" title="重启 NoneBot 进程">重启</button>
             </div>
           </div>
 
@@ -442,6 +436,6 @@
   </div>
 
   <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
-  <script src="./assets/app.js?v=0.3.0" defer></script>
+  <script src="./assets/app.js?v=0.5.2" defer></script>
 </body>
 </html>

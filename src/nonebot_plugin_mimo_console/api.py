@@ -1,6 +1,8 @@
 import asyncio
 import os
 import signal
+import subprocess
+import sys
 import time
 from collections import defaultdict, deque
 from typing import Annotated, Any, Literal
@@ -310,8 +312,9 @@ def create_router(state: ConsoleState) -> APIRouter:
     @router.get("/api/system/version")
     async def system_version(
         session: Annotated[Session, Depends(require_session)],
+        force: bool = Query(default=False),
     ) -> dict[str, Any]:
-        await state.release_cache.fetch()
+        await state.release_cache.fetch(force=force)
         return state.release_cache.snapshot(get_installed_version())
 
     @router.post("/api/system/update")
@@ -358,11 +361,28 @@ def create_router(state: ConsoleState) -> APIRouter:
     async def restart_nonebot(
         session: Annotated[Session, Depends(require_session)],
     ) -> dict[str, Any]:
-        # 延迟发出 SIGINT，让响应先返回；nonebot/uvicorn 优雅退出后，
-        # 由外部进程管理器（systemd / MCSManager autoRestart / pm2 / Docker 等）拉起。
-        # 若进程未被托管，本次退出后不会自动重启。
-        asyncio.get_running_loop().call_later(1.5, lambda: os.kill(os.getpid(), signal.SIGINT))
-        logger.warning("[Mimo Console] 收到重启请求，进程即将退出")
+        # 派一个 detached 子进程 watcher：当前进程退出、端口释放后，
+        # watcher 用原启动命令重新执行，实现自重启——不依赖任何外部进程管理器。
+        # 代价：新进程脱离原托管（如 MCSManager 面板会显示 stopped，但子进程在跑）。
+        restarter = (
+            "import os, time\n"
+            "time.sleep(2.5)\n"
+            "args = os.environ['MIMO_RESTART_ARGS'].split('\\x1f')\n"
+            "os.execvp(args[0], args)\n"
+        )
+        env = os.environ.copy()
+        env["MIMO_RESTART_ARGS"] = "\x1f".join([sys.executable, *sys.argv])
+        subprocess.Popen(
+            [sys.executable, "-c", restarter],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            cwd=os.getcwd(),
+            env=env,
+        )
+        logger.warning("[Mimo Console] 收到重启请求，已派出 watcher，进程即将退出")
+        asyncio.get_running_loop().call_later(1.5, lambda: os.kill(os.getpid(), signal.SIGTERM))
         return {"ok": True, "restart_required": True}
 
     index = state.static_dir / "index.html"
