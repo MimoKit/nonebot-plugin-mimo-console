@@ -8,7 +8,7 @@ from collections import defaultdict, deque
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from nonebot import get_driver, logger
 from pydantic import BaseModel, Field
@@ -390,7 +390,14 @@ def create_router(state: ConsoleState) -> APIRouter:
         return RedirectResponse(f"{state.config.mimo_console_path}/")
 
     @router.get("/", include_in_schema=False)
-    async def index_page() -> FileResponse:
-        return FileResponse(index, headers={"Cache-Control": "no-store"})
+    async def index_page() -> HTMLResponse:
+        html = index.read_text(encoding="utf-8")
+        payload = background_payload(state.background.snapshot())
+        if payload.get("url"):
+            # 登录页未登录，无法走前端 fetch，直接把当前背景注入 <style>。
+            # url 已由 normalize_background_url 校验（禁 " \ < >），可安全注入 CSS/HTML。
+            inject = '<style>:root{--bg-image:url("' + payload["url"] + '")}</style>'
+            html = html.replace("</head>", inject + "</head>", 1)
+        return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
     return router

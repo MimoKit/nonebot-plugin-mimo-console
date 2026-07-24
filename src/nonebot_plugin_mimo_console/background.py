@@ -37,8 +37,9 @@ def normalize_background_url(url: str) -> str:
         raise BackgroundError("背景 URL 不能为空")
     if len(text) > URL_MAX_LENGTH:
         raise BackgroundError("背景 URL 过长")
-    # 在 CSS `url("...")` 上下文里，引号与反斜杠会闭合或转义出字符串，直接禁掉。
-    if any(ch in text for ch in ('"', "\\")):
+    # 在 CSS `url("...")` 和注入到 index.html 的 <style> 上下文里，
+    # 引号/反斜杠会闭合或转义，尖括号会破坏 HTML，全部禁掉。
+    if any(ch in text for ch in ('"', "\\", "<", ">")):
         raise BackgroundError("背景 URL 含有不被允许的字符")
     try:
         parsed = urlparse(text)
