@@ -7,11 +7,12 @@ from typing import Any
 import httpx
 
 PACKAGE_NAME = "nonebot-plugin-mimo-console"
-GITHUB_LATEST_RELEASE = (
-    "https://api.github.com/repos/MimoKit/nonebot-plugin-mimo-console/releases/latest"
+# 直接读上游 master 的 pyproject.toml version，无需 maintainer 发 release。
+MASTER_PYPROJECT_URL = (
+    "https://raw.githubusercontent.com/MimoKit/nonebot-plugin-mimo-console/master/pyproject.toml"
 )
-# 形如 v0.1.0 / 0.1.0 / v1.2.3rc1 → 取 0.1.0 / 1.2.3rc1
 _TAG_RE = re.compile(r"^v?(\d+\.\d+\.\d+[A-Za-z0-9.+~-]*)$")
+_PYPROJECT_VERSION_RE = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
 
 
 class VersionError(RuntimeError):
@@ -39,58 +40,46 @@ def is_newer(latest: str, current: str) -> bool:
     if not latest or not current:
         return False
     try:
-        from packaging.version import InvalidVersion, Version
+        from packaging.version import Version
     except ImportError:
         return latest != current
     try:
         return Version(latest) > Version(current)
-    except (InvalidVersion, ValueError):
+    except ValueError:  # packaging.version.InvalidVersion 是 ValueError 子类
         return latest != current
 
 
 class LatestReleaseCache:
-    """GitHub 最新 release 的带缓存读取，避免触发限流。"""
+    """上游 master 最新版本号的带缓存读取（直接拉 pyproject，无需 release/tag）。"""
 
     def __init__(self, cache_seconds: int = 1800) -> None:
         self.cache_seconds = cache_seconds
-        self._data: dict[str, Any] | None = None
-        self._fetched_at = 0.0
+        self._latest: str = ""
+        self._fetched_at: float = 0.0
 
-    async def fetch(self, force: bool = False) -> dict[str, Any]:
-        fresh = self._data is not None and time.time() - self._fetched_at < self.cache_seconds
+    async def fetch(self, force: bool = False) -> str:
+        fresh = self._latest != "" and time.time() - self._fetched_at < self.cache_seconds
         if fresh and not force:
-            return self._data or {}
+            return self._latest
         try:
             async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
                 response = await client.get(
-                    GITHUB_LATEST_RELEASE,
-                    headers={
-                        "Accept": "application/vnd.github+json",
-                        "User-Agent": PACKAGE_NAME,
-                    },
+                    MASTER_PYPROJECT_URL,
+                    headers={"User-Agent": PACKAGE_NAME},
                 )
-                if response.status_code == 404:
-                    self._data = {}  # 还没有 release
-                else:
-                    response.raise_for_status()
-                    payload = response.json()
-                    self._data = payload if isinstance(payload, dict) else {}
-        except (httpx.HTTPError, ValueError):
-            # 网络或解析失败时保留旧缓存，首次失败则置空
-            if self._data is None:
-                self._data = {}
+                response.raise_for_status()
+                match = _PYPROJECT_VERSION_RE.search(response.text)
+                self._latest = match.group(1) if match else ""
+        except (httpx.HTTPError, OSError):
+            # 网络失败保留上次缓存的版本号；从未成功过则为空串
+            pass
         self._fetched_at = time.time()
-        return self._data or {}
+        return self._latest
 
     def snapshot(self, installed: str) -> dict[str, Any]:
-        """根据已缓存的 release 构造给前端的版本信息。"""
-        data = self._data or {}
-        latest = normalize_tag(str(data.get("tag_name") or ""))
+        latest = self._latest
         return {
             "current": installed,
             "latest": latest,
             "has_update": is_newer(latest, installed),
-            "release_url": str(data.get("html_url") or ""),
-            "release_notes": str(data.get("body") or ""),
-            "published_at": str(data.get("published_at") or ""),
         }
