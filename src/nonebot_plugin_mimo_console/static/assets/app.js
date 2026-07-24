@@ -173,9 +173,7 @@ function bindEvents() {
   $("#bg-reset").addEventListener("click", resetBg);
   $("#bg-file-label").addEventListener("click", () => $("#bg-file-input").click());
   $("#restart-button").addEventListener("click", restartNonebot);
-  $("#version-update-btn").addEventListener("click", () => {
-    if (state.version && state.version.has_update) openUpdateConfirm(state.version);
-  });
+  $("#check-update-btn").addEventListener("click", checkUpdate);
   $$(".view-toggle button").forEach((button) => button.addEventListener("click", () => {
     $$(".view-toggle button").forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
@@ -932,14 +930,25 @@ async function clearLogs() {
 
 const BG_SOURCE_LABELS = { default: "默认背景", url: "远程链接", upload: "本地上传" };
 
+const DEFAULT_BG_IMAGE = `${rootPath}/assets/status-bg.jpg`;
+
+function resolveBgUrl(data) {
+  const source = (data && data.source) || "default";
+  const url = (data && data.url) || "";
+  if ((source === "url" || source === "upload") && url) return url;
+  if (source === "default" && url) return url; // 来自 env MIMO_CONSOLE_BACKGROUND_URL
+  return DEFAULT_BG_IMAGE;
+}
+
 function applyBackground(payload) {
   const data = payload || { source: "default", url: "" };
   state.background = data;
   const root = document.documentElement;
-  const usable = (data.source === "url" || data.source === "upload") && data.url;
+  const bgUrl = resolveBgUrl(data);
   // CSS `--bg-image` 仅替换默认背景图层，遮罩与兜底色由 styles.css 保留。
-  if (usable) {
-    root.style.setProperty("--bg-image", `url("${data.url}")`);
+  // 内置 status-bg.jpg 本就是 CSS 默认值，无需注入 --bg-image。
+  if (bgUrl && bgUrl !== DEFAULT_BG_IMAGE) {
+    root.style.setProperty("--bg-image", `url("${bgUrl}")`);
   } else {
     root.style.removeProperty("--bg-image");
   }
@@ -969,9 +978,8 @@ function updateAppearanceUi(data) {
   if (pill) pill.textContent = `当前：${BG_SOURCE_LABELS[source] || "默认背景"}`;
   const preview = $("#bg-preview");
   if (preview) {
-    const usable = (source === "url" || source === "upload") && data.url;
-    preview.style.backgroundImage = usable ? `url("${data.url}")` : "";
-    preview.classList.toggle("empty", !usable);
+    preview.style.backgroundImage = `url("${resolveBgUrl(data)}")`;
+    preview.classList.remove("empty");
   }
   const urlInput = $("#bg-url-input");
   if (urlInput && source === "url" && data.url) urlInput.value = data.url;
@@ -1044,29 +1052,42 @@ async function loadVersion() {
 
 function renderVersion(data) {
   $("#version-current").textContent = data.current ? `v${data.current}` : "--";
-  const button = $("#version-update-btn");
-  if (data.has_update && data.latest) {
-    $("#version-latest").textContent = `v${data.latest}`;
-    button.classList.remove("hidden");
-  } else {
-    button.classList.add("hidden");
+}
+
+async function checkUpdate() {
+  const button = $("#check-update-btn");
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "检测中…";
+  try {
+    const data = await api("/system/version?force=true");
+    state.version = data;
+    renderVersion(data);
+    if (data.has_update && data.latest) {
+      const ok = window.confirm(
+        `检测到新版本 v${data.latest}（当前 v${data.current || "?"}），是否立即更新？\n将通过 nb plugin update 拉取最新版，完成后自动重启 NoneBot。`,
+      );
+      if (ok) await runUpdate();
+    } else if (data.latest) {
+      toast(`已是最新版本 v${data.current}`);
+    } else {
+      toast("GitHub 暂无发布版本，无法检测更新", "error");
+    }
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
   }
 }
 
-async function openUpdateConfirm(data) {
-  if (!window.confirm(`更新到 v${data.latest}？将通过 nb plugin update 拉取最新版，完成后需要重启 NoneBot。`)) return;
-  const button = $("#version-update-btn");
-  const original = button.innerHTML;
-  button.disabled = true;
-  button.textContent = "更新中…";
+async function runUpdate() {
   try {
     await api("/system/update", { method: "POST" });
     toast("已更新，正在重启…", "warning");
     pollRestart();
   } catch (error) {
     toast(error.message, "error");
-    button.innerHTML = original;
-    button.disabled = false;
   }
 }
 

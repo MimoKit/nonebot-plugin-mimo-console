@@ -310,8 +310,9 @@ def create_router(state: ConsoleState) -> APIRouter:
     @router.get("/api/system/version")
     async def system_version(
         session: Annotated[Session, Depends(require_session)],
+        force: bool = Query(default=False),
     ) -> dict[str, Any]:
-        await state.release_cache.fetch()
+        await state.release_cache.fetch(force=force)
         return state.release_cache.snapshot(get_installed_version())
 
     @router.post("/api/system/update")

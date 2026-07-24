@@ -1836,7 +1836,10 @@ a { color: inherit; text-decoration: none; }
 .bg-preview {
   height: 220px;
   border-radius: var(--radius-sm);
-  background: var(--bg) center/cover no-repeat;
+  background-color: var(--bg);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
   border: 1px solid var(--line);
   position: relative;
   overflow: hidden;
@@ -1884,9 +1887,10 @@ a { color: inherit; text-decoration: none; }
 /* hero 版本信息 + 重启按钮 */
 .hero-side {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 10px;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .hero-version {
   display: flex;
