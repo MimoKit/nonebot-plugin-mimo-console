@@ -25,6 +25,7 @@ const state = {
   timers: [],
   detailPlugin: null,
   detailSource: null,
+  background: { source: "default", url: "" },
 };
 
 const $ = (selector, context = document) => context.querySelector(selector);
@@ -163,6 +164,13 @@ function bindEvents() {
     $("#log-follow").classList.toggle("active", state.logFollow);
   });
   $("#clear-logs").addEventListener("click", clearLogs);
+  $$("input[name='bg-mode']").forEach((radio) =>
+    radio.addEventListener("change", () => switchBgMode(radio.value)),
+  );
+  $("#bg-url-save").addEventListener("click", saveBgUrl);
+  $("#bg-file-input").addEventListener("change", (event) => uploadBgFile(event.target));
+  $("#bg-reset").addEventListener("click", resetBg);
+  $("#bg-file-label").addEventListener("click", () => $("#bg-file-input").click());
   $$(".view-toggle button").forEach((button) => button.addEventListener("click", () => {
     $$(".view-toggle button").forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
@@ -219,7 +227,7 @@ function enterApp(username) {
   clearTimers();
   state.timers.push(setInterval(() => loadDashboard(false), 5000));
   state.timers.push(setInterval(loadLogs, 2000));
-  Promise.allSettled([loadDashboard(), loadPlugins(), loadLogs()]);
+  Promise.allSettled([loadDashboard(), loadPlugins(), loadLogs(), loadBackground()]);
 }
 
 async function signOut(requestLogout) {
@@ -230,6 +238,7 @@ async function signOut(requestLogout) {
   closeDetail();
   state.token = "";
   localStorage.removeItem(storageKey);
+  applyBackground({ source: "default", url: "" });
   $("#app").classList.add("hidden");
   $("#auth-screen").classList.remove("hidden");
   $("#password").value = "";
@@ -241,7 +250,7 @@ function clearTimers() {
   state.timers = [];
 }
 
-const pages = { dashboard: "概览", plugins: "插件", config: "配置", logs: "日志" };
+const pages = { dashboard: "概览", plugins: "插件", config: "配置", logs: "日志", appearance: "外观" };
 async function navigate(page) {
   if (!pages[page]) return;
   state.page = page;
@@ -252,6 +261,7 @@ async function navigate(page) {
   if (page === "plugins") await refreshPluginsPage();
   if (page === "config") await loadConfig();
   if (page === "logs") { await loadLogs(); scrollLogs(); }
+  if (page === "appearance") refreshAppearance();
 }
 
 function toggleSidebar(show) {
@@ -912,6 +922,111 @@ async function clearLogs() {
     toast("日志视图已清空");
   } catch (error) {
     toast(error.message, "error");
+  }
+}
+
+const BG_SOURCE_LABELS = { default: "默认背景", url: "远程链接", upload: "本地上传" };
+
+function applyBackground(payload) {
+  const data = payload || { source: "default", url: "" };
+  state.background = data;
+  const root = document.documentElement;
+  const usable = (data.source === "url" || data.source === "upload") && data.url;
+  // CSS `--bg-image` 仅替换默认背景图层，遮罩与兜底色由 styles.css 保留。
+  if (usable) {
+    root.style.setProperty("--bg-image", `url("${data.url}")`);
+  } else {
+    root.style.removeProperty("--bg-image");
+  }
+  if (state.page === "appearance") updateAppearanceUi(data);
+}
+
+async function loadBackground() {
+  try {
+    applyBackground(await api("/background"));
+  } catch (_) {
+    applyBackground({ source: "default", url: "" });
+  }
+}
+
+function refreshAppearance() {
+  updateAppearanceUi(state.background);
+}
+
+function updateAppearanceUi(data) {
+  const source = data.source || "default";
+  const radio = $(`#bg-mode-${source}`);
+  if (radio) radio.checked = true;
+  switchBgMode(source);
+  const chip = $("#bg-source-chip");
+  const pill = $("#bg-status-pill");
+  if (chip) chip.textContent = BG_SOURCE_LABELS[source] || "默认背景";
+  if (pill) pill.textContent = `当前：${BG_SOURCE_LABELS[source] || "默认背景"}`;
+  const preview = $("#bg-preview");
+  if (preview) {
+    const usable = (source === "url" || source === "upload") && data.url;
+    preview.style.backgroundImage = usable ? `url("${data.url}")` : "";
+    preview.classList.toggle("empty", !usable);
+  }
+  const urlInput = $("#bg-url-input");
+  if (urlInput && source === "url" && data.url) urlInput.value = data.url;
+}
+
+function switchBgMode(mode) {
+  $("#bg-url-field").classList.toggle("hidden", mode !== "url");
+  $("#bg-upload-field").classList.toggle("hidden", mode !== "upload");
+}
+
+async function saveBgUrl() {
+  const url = ($("#bg-url-input").value || "").trim();
+  if (!url) { toast("请填写图片 URL", "error"); return; }
+  const button = $("#bg-url-save");
+  button.disabled = true;
+  try {
+    applyBackground(await api("/background", { method: "PUT", body: JSON.stringify({ url }) }));
+    toast("背景已更新");
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function uploadBgFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) {
+    toast("图片不能超过 5MB", "error");
+    input.value = "";
+    return;
+  }
+  const label = $("#bg-file-label");
+  const original = label.textContent;
+  label.textContent = "上传中…";
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    applyBackground(await api("/background/upload", { method: "POST", body: form }));
+    toast("背景已更新");
+  } catch (error) {
+    toast(error.message, "error");
+    label.textContent = original;
+  } finally {
+    input.value = "";
+  }
+}
+
+async function resetBg() {
+  const button = $("#bg-reset");
+  button.disabled = true;
+  try {
+    applyBackground(await api("/background", { method: "DELETE" }));
+    $("#bg-url-input").value = "";
+    toast("已恢复默认背景");
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    button.disabled = false;
   }
 }
 

@@ -21,6 +21,7 @@
 - 搜索 NoneBot 官方插件商店，安装、更新或卸载插件。
 - 在网页中修改 dotenv 配置，敏感字段自动脱敏，保存前自动备份。
 - 搜索和筛选当前进程日志。
+- 自定义 WebUI 背景图，支持远程链接或本地上传。
 - 使用初始化令牌创建管理员，后续通过账号密码登录。
 
 前端资源随插件一起安装，不依赖单独的 Web 服务，也不绑定任何消息适配器。
@@ -67,6 +68,7 @@ http://127.0.0.1:8080/mimo-console/
 | `MIMO_CONSOLE_ALLOW_PACKAGE_MANAGEMENT` | `true` | 允许安装、更新和卸载插件 |
 | `MIMO_CONSOLE_STORE_CACHE_SECONDS` | `600` | 商店数据缓存时间 |
 | `MIMO_CONSOLE_PACKAGE_TIMEOUT` | `300` | 插件操作超时时间（秒） |
+| `MIMO_CONSOLE_BACKGROUND_URL` | 空 | 默认背景图的远程 URL（可选，http/https）；运行时也可在外观页修改 |
 
 超级用户也可以发送 `mimo控制台` 或 `NoneBot控制台` 获取访问地址。
 
@@ -75,6 +77,7 @@ http://127.0.0.1:8080/mimo-console/
 - 管理员数据由 `nonebot-plugin-localstore` 保存，不会写进插件安装目录。
 - Token、Secret、Password、Cookie、API Key 等配置值默认脱敏。
 - 配置修改会生成备份，重启 NoneBot 后生效。
+- 自定义背景图保存在 localstore 数据目录，上传文件名随机化；远程 URL 仅允许 http/https，浏览器端加载，不做服务端可达性校验。
 - 公网部署建议在反向代理层启用 HTTPS 和额外访问限制。
 
 ## 本地开发

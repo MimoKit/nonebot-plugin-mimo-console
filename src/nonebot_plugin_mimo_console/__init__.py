@@ -9,6 +9,7 @@ from nonebot.permission import SUPERUSER
 from nonebot.plugin import PluginMetadata
 
 from .api import create_router
+from .background import BackgroundStore
 from .config import ConsoleConfig
 from .log_buffer import LogBuffer
 from .security import AuthStore
@@ -48,6 +49,11 @@ console_state = ConsoleState(
     static_dir=static_dir,
     backup_dir=localstore.get_plugin_data_dir() / "backups",
     store=PluginStore(console_config.mimo_console_store_cache_seconds),
+    background=BackgroundStore(
+        data_file=localstore.get_plugin_data_file("background.json"),
+        image_dir=localstore.get_plugin_data_dir() / "backgrounds",
+        default_url=console_config.mimo_console_background_url,
+    ),
 )
 
 app = get_app()

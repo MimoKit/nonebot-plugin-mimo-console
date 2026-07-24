@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .background import BackgroundStore
 from .config import ConsoleConfig
 from .log_buffer import LogBuffer
 from .security import AuthStore
@@ -17,5 +18,6 @@ class ConsoleState:
     static_dir: Path
     backup_dir: Path
     store: PluginStore
+    background: BackgroundStore
     setup_token: str | None = None
     log_sink_id: int | None = None
