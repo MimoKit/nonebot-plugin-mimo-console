@@ -1157,7 +1157,7 @@ async function checkUpdate() {
     renderVersion(data);
     if (data.has_update && data.latest) {
       const ok = window.confirm(
-        `检测到新版本 v${data.latest}（当前 v${data.current || "?"}），是否立即更新？\n将通过 nb plugin update 拉取最新版，完成后自动重启 NoneBot。`,
+        `检测到新版本 v${data.latest}（当前 v${data.current || "?"}），是否立即更新？\n将通过当前项目包管理器拉取 GitHub 最新版，完成后自动重启 NoneBot。`,
       );
       if (ok) await runUpdate();
     } else if (data.latest) {

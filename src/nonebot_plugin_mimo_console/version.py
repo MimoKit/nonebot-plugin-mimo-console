@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 
 PACKAGE_NAME = "nonebot-plugin-mimo-console"
+PACKAGE_GIT_URL = "https://github.com/MimoKit/nonebot-plugin-mimo-console.git"
 # 直接读上游 master 的 pyproject.toml version，无需 maintainer 发 release。
 MASTER_PYPROJECT_URL = (
     "https://raw.githubusercontent.com/MimoKit/nonebot-plugin-mimo-console/master/pyproject.toml"

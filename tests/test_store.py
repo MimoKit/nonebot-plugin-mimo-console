@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -34,6 +35,36 @@ class StoreTests(unittest.TestCase):
         for value in ("plugin name", "plugin/../../bad", "--help"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 store.build_nb_command(Path("."), "install", value)
+
+    def test_build_self_update_command_prefers_uv_git_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "pyproject.toml").write_text("[project]\nname='bot'\n", encoding="utf-8")
+            command = store.build_self_update_command(
+                root,
+                "nonebot-plugin-mimo-console",
+                "https://github.com/MimoKit/nonebot-plugin-mimo-console.git",
+                uv_executable="/usr/bin/uv",
+            )
+        self.assertEqual(command[0], "/usr/bin/uv")
+        self.assertEqual(
+            command[1:3],
+            [
+                "add",
+                "nonebot-plugin-mimo-console @ git+https://github.com/MimoKit/nonebot-plugin-mimo-console.git",
+            ],
+        )
+        self.assertEqual(command[-2:], ["--upgrade-package", "nonebot-plugin-mimo-console"])
+
+    def test_build_self_update_command_falls_back_to_pip(self) -> None:
+        command = store.build_self_update_command(
+            Path("bot-project"),
+            "nonebot-plugin-mimo-console",
+            "https://github.com/MimoKit/nonebot-plugin-mimo-console.git",
+            uv_executable="",
+        )
+        self.assertEqual(command[:4], [sys.executable, "-m", "pip", "install"])
+        self.assertEqual(command[-1], "git+https://github.com/MimoKit/nonebot-plugin-mimo-console.git")
 
     def test_registry_item_validation(self) -> None:
         valid = {

@@ -6,6 +6,7 @@ import importlib.metadata
 import importlib.util
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -83,6 +84,43 @@ def build_nb_command(
         "plugin",
         action,
         project_name,
+    ]
+
+
+def _find_uv_executable() -> str:
+    found = shutil.which("uv")
+    if found:
+        return found
+    user_uv = Path.home() / ".local" / "bin" / "uv"
+    if user_uv.is_file():
+        return str(user_uv)
+    return ""
+
+
+def build_self_update_command(
+    project_root: Path,
+    project_name: str,
+    git_url: str,
+    uv_executable: str | None = None,
+) -> list[str]:
+    if not SAFE_NAME_RE.fullmatch(project_name):
+        raise ValueError("插件包名不合法")
+    uv = uv_executable if uv_executable is not None else _find_uv_executable()
+    if uv and (project_root / "pyproject.toml").is_file():
+        return [
+            uv,
+            "add",
+            f"{project_name} @ git+{git_url}",
+            "--upgrade-package",
+            project_name,
+        ]
+    return [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--upgrade",
+        f"git+{git_url}",
     ]
 
 

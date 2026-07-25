@@ -18,8 +18,8 @@ from .env_editor import locate_env_file, read_env, update_env
 from .runtime import dashboard_snapshot, plugin_snapshot
 from .security import AuthError, Session
 from .state import ConsoleState
-from .store import StoreError, _clean_output, build_nb_command
-from .version import PACKAGE_NAME, get_installed_version
+from .store import StoreError, _clean_output, build_self_update_command
+from .version import PACKAGE_GIT_URL, PACKAGE_NAME, get_installed_version
 
 
 class SetupBody(BaseModel):
@@ -321,7 +321,11 @@ def create_router(state: ConsoleState) -> APIRouter:
     ) -> dict[str, Any]:
         if state.store.action_lock.locked():
             raise HTTPException(status_code=409, detail="另一个插件操作仍在进行中")
-        command = build_nb_command(state.config.project_root(), "update", PACKAGE_NAME)
+        command = build_self_update_command(
+            state.config.project_root(),
+            PACKAGE_NAME,
+            PACKAGE_GIT_URL,
+        )
         env = os.environ.copy()
         env.update({"NO_COLOR": "1", "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
         async with state.store.action_lock:
