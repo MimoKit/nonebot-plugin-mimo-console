@@ -24,7 +24,9 @@ from .version import (
     GITHUB_PROXY_PRESETS,
     PACKAGE_NAME,
     get_installed_version,
+    is_mirror_repo,
     normalize_github_proxy,
+    probe_mirror_repo,
     resolve_git_url,
     resolve_version_url,
 )
@@ -51,6 +53,11 @@ class BackgroundUrlBody(BaseModel):
 
 class PluginActionBody(BaseModel):
     action: Literal["install", "update", "uninstall"]
+
+
+class PluginDisabledBody(BaseModel):
+    plugin: str = Field(min_length=1, max_length=128)
+    disabled: bool
 
 
 class GithubProxyBody(BaseModel):
@@ -156,7 +163,33 @@ def create_router(state: ConsoleState) -> APIRouter:
     async def plugins(
         session: Annotated[Session, Depends(require_session)],
     ) -> dict[str, Any]:
-        return {"items": await asyncio.to_thread(plugin_snapshot)}
+        disabled = state.disabled.names
+        items = await asyncio.to_thread(plugin_snapshot)
+        for item in items:
+            item["disabled"] = item["name"] in disabled
+        return {"items": items}
+
+    @router.put("/api/plugins/disabled")
+    async def set_plugin_disabled(
+        body: PluginDisabledBody,
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        name = body.plugin.strip()
+        loaded = {item["name"] for item in await asyncio.to_thread(plugin_snapshot)}
+        if name not in loaded:
+            raise HTTPException(status_code=404, detail="插件未加载或不存在")
+        try:
+            await asyncio.to_thread(state.disabled.set, name, body.disabled)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        action = "禁用" if body.disabled else "启用"
+        logger.warning(f"[Mimo Console] 已{action}插件：{name}")
+        return {
+            "ok": True,
+            "plugin": name,
+            "disabled": body.disabled,
+            "disabled_plugins": sorted(state.disabled.names),
+        }
 
     @router.get("/api/store/plugins")
     async def store_plugins(
@@ -367,8 +400,19 @@ def create_router(state: ConsoleState) -> APIRouter:
             proxy = normalize_github_proxy(body.proxy)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        url = resolve_version_url(proxy)
         started = time.perf_counter()
+        if is_mirror_repo(proxy):
+            # 镜像仓库无 raw 直链，用 git ls-remote 探测可达性
+            reachable = await probe_mirror_repo(proxy)
+            latency = int((time.perf_counter() - started) * 1000)
+            if not reachable:
+                return {
+                    "ok": False,
+                    "latency_ms": None,
+                    "detail": "镜像仓库无法通过 git 匿名访问",
+                }
+            return {"ok": True, "latency_ms": latency, "detail": ""}
+        url = resolve_version_url(proxy)
         try:
             async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
                 response = await client.get(url, headers={"User-Agent": PACKAGE_NAME})

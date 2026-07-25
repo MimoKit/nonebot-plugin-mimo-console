@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .background import BackgroundStore
 from .config import ConsoleConfig
+from .disabled import DisabledStore
 from .log_buffer import LogBuffer
 from .security import AuthStore
 from .store import PluginStore
@@ -21,5 +22,6 @@ class ConsoleState:
     store: PluginStore
     background: BackgroundStore
     release_cache: LatestReleaseCache
+    disabled: DisabledStore
     setup_token: str | None = None
     log_sink_id: int | None = None

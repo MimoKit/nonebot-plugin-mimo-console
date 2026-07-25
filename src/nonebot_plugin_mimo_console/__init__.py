@@ -5,12 +5,16 @@ from pathlib import Path
 
 from fastapi.staticfiles import StaticFiles
 from nonebot import get_app, get_driver, get_plugin_config, logger, on_command, require
+from nonebot.exception import IgnoredException
+from nonebot.matcher import Matcher
+from nonebot.message import run_preprocessor
 from nonebot.permission import SUPERUSER
 from nonebot.plugin import PluginMetadata
 
 from .api import create_router
 from .background import BackgroundStore
 from .config import ConsoleConfig
+from .disabled import DisabledStore
 from .log_buffer import LogBuffer
 from .security import AuthStore
 from .state import ConsoleState
@@ -56,7 +60,20 @@ console_state = ConsoleState(
         default_url=console_config.mimo_console_background_url,
     ),
     release_cache=LatestReleaseCache(),
+    disabled=DisabledStore(
+        localstore.get_plugin_data_file("disabled_plugins.json"),
+        protected=("nonebot_plugin_mimo_console",),
+    ),
 )
+
+
+@run_preprocessor
+async def _disabled_plugin_guard(matcher: Matcher) -> None:
+    """被控制台禁用的插件，其响应器直接忽略事件（后台任务不受影响）。"""
+    plugin_name = matcher.plugin_name or ""
+    if plugin_name and console_state.disabled.is_disabled(plugin_name):
+        raise IgnoredException(f"插件 {plugin_name} 已被 Mimo Console 禁用")
+
 
 app = get_app()
 app.include_router(create_router(console_state), prefix=console_path)
