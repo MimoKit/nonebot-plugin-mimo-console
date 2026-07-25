@@ -64,7 +64,9 @@ class StoreTests(unittest.TestCase):
             uv_executable="",
         )
         self.assertEqual(command[:4], [sys.executable, "-m", "pip", "install"])
-        self.assertEqual(command[-1], "git+https://github.com/MimoKit/nonebot-plugin-mimo-console.git")
+        self.assertEqual(
+            command[-1], "git+https://github.com/MimoKit/nonebot-plugin-mimo-console.git"
+        )
 
     def test_registry_item_validation(self) -> None:
         valid = {
