@@ -18,6 +18,10 @@ normalize_tag = version.normalize_tag
 is_newer = version.is_newer
 get_installed_version = version.get_installed_version
 LatestReleaseCache = version.LatestReleaseCache
+normalize_github_proxy = version.normalize_github_proxy
+is_mirror_repo = version.is_mirror_repo
+resolve_git_url = version.resolve_git_url
+resolve_version_url = version.resolve_version_url
 
 
 class NormalizeTagTests(unittest.TestCase):
@@ -91,6 +95,52 @@ class LatestReleaseCacheSnapshotTests(unittest.TestCase):
     def test_snapshot_no_update_when_installed_unknown(self) -> None:
         snap = self._cache("0.2.0").snapshot("")
         self.assertFalse(snap["has_update"])
+
+
+class GithubProxyTests(unittest.TestCase):
+    def test_normalize_empty_means_direct(self) -> None:
+        self.assertEqual(normalize_github_proxy(""), "")
+        self.assertEqual(normalize_github_proxy("   "), "")
+
+    def test_normalize_strips_trailing_slash(self) -> None:
+        self.assertEqual(normalize_github_proxy("https://gh-proxy.com/"), "https://gh-proxy.com")
+
+    def test_normalize_rejects_invalid(self) -> None:
+        for value in ("ftp://x", "https://a b", "https://user@host", "not-a-url", "https://x/#f"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                normalize_github_proxy(value)
+
+    def test_is_mirror_repo(self) -> None:
+        self.assertTrue(is_mirror_repo(version.CNB_MIRROR_REPO))
+        self.assertTrue(is_mirror_repo(f"{version.CNB_MIRROR_REPO}.git"))
+        self.assertFalse(is_mirror_repo("https://gh-proxy.com"))
+
+    def test_resolve_git_url_direct(self) -> None:
+        self.assertEqual(resolve_git_url(""), version.PACKAGE_GIT_URL)
+
+    def test_resolve_git_url_prefix(self) -> None:
+        self.assertEqual(
+            resolve_git_url("https://gh-proxy.com"),
+            f"https://gh-proxy.com/{version.PACKAGE_GIT_URL}",
+        )
+
+    def test_resolve_git_url_mirror(self) -> None:
+        self.assertEqual(resolve_git_url(version.CNB_MIRROR_REPO), version.CNB_MIRROR_REPO)
+
+    def test_resolve_version_url_direct(self) -> None:
+        self.assertEqual(resolve_version_url(""), version.MASTER_PYPROJECT_URL)
+
+    def test_resolve_version_url_prefix(self) -> None:
+        self.assertEqual(
+            resolve_version_url("https://gh-proxy.com/"),
+            f"https://gh-proxy.com/{version.MASTER_PYPROJECT_URL}",
+        )
+
+    def test_resolve_version_url_mirror(self) -> None:
+        self.assertEqual(
+            resolve_version_url(version.CNB_MIRROR_REPO),
+            f"{version.CNB_MIRROR_REPO}/-/raw/master/pyproject.toml",
+        )
 
 
 if __name__ == "__main__":

@@ -770,6 +770,13 @@ a { color: inherit; text-decoration: none; }
 .bot-chip strong { display: block; font-size: 12px; }
 .bot-chip span, .empty-mini { color: var(--muted); font-size: 11px; }
 .recent-panel { margin-top: 12px; }
+.proxy-panel { margin-top: 12px; padding: 22px; }
+.proxy-panel .proxy-hint { margin: -8px 0 16px; font-size: 13px; line-height: 1.6; }
+.proxy-panel .bg-modes { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.proxy-panel .bg-mode-text { min-width: 0; }
+.proxy-panel .bg-mode-text strong { overflow-wrap: anywhere; word-break: break-all; line-height: 1.45; }
+.proxy-panel .bg-actions { align-items: center; }
+.proxy-panel #proxy-status { font-size: 12px; overflow-wrap: anywhere; }
 .recent-logs {
   overflow: hidden;
   border: 1px solid var(--line);
@@ -1719,6 +1726,7 @@ a { color: inherit; text-decoration: none; }
 .metric,
 .dash-grid > .panel,
 .recent-panel,
+.proxy-panel,
 .toolbar,
 .tabs,
 .plugin-card,

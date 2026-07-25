@@ -28,6 +28,7 @@ const state = {
   background: { source: "default", url: "" },
   theme: null,
   version: null,
+  proxy: { proxy: "", presets: [] },
 };
 
 const $ = (selector, context = document) => context.querySelector(selector);
@@ -186,6 +187,8 @@ function bindEvents() {
   $("#theme-reset").addEventListener("click", resetTheme);
   $("#restart-button").addEventListener("click", restartNonebot);
   $("#check-update-btn").addEventListener("click", checkUpdate);
+  $("#proxy-save").addEventListener("click", saveProxySettings);
+  $("#proxy-test-btn").addEventListener("click", testProxySettings);
   $$(".view-toggle button").forEach((button) => button.addEventListener("click", () => {
     $$(".view-toggle button").forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
@@ -242,7 +245,7 @@ function enterApp(username) {
   clearTimers();
   state.timers.push(setInterval(() => loadDashboard(false), 5000));
   state.timers.push(setInterval(loadLogs, 2000));
-  Promise.allSettled([loadDashboard(), loadPlugins(), loadLogs(), loadBackground(), loadVersion()]);
+  Promise.allSettled([loadDashboard(), loadPlugins(), loadLogs(), loadBackground(), loadVersion(), loadProxySettings()]);
 }
 
 async function signOut(requestLogout) {
@@ -1144,6 +1147,106 @@ async function loadVersion() {
 
 function renderVersion(data) {
   $("#version-current").textContent = data.current ? `v${data.current}` : "--";
+}
+
+const PROXY_CUSTOM_VALUE = "__custom__";
+
+function presetLabel(url) {
+  return url.includes("cnb.cool") ? "CNB 镜像仓库" : "GitHub 加速代理";
+}
+
+async function loadProxySettings() {
+  try {
+    state.proxy = await api("/system/github-proxy");
+    renderProxySettings();
+  } catch (_) { /* 读取失败不影响使用 */ }
+}
+
+function renderProxySettings() {
+  const container = $("#proxy-modes");
+  if (!container) return;
+  const presets = state.proxy.presets || [];
+  const current = state.proxy.proxy || "";
+  const options = [
+    { value: "", title: "不使用 GitHub 加速", desc: "直连 GitHub" },
+    ...presets.map((url) => ({ value: url, title: url, desc: presetLabel(url) })),
+    { value: PROXY_CUSTOM_VALUE, title: "自定义", desc: "填入自定义加速前缀或镜像仓库地址" },
+  ];
+  container.innerHTML = options
+    .map(
+      (opt) => `<label class="bg-mode">
+        <input type="radio" name="gh-proxy" value="${escapeHtml(opt.value)}"${opt.value === "" ? " data-proxy-off" : ""}>
+        <span class="bg-mode-text"><strong>${escapeHtml(opt.title)}</strong><small>${escapeHtml(opt.desc)}</small></span>
+      </label>`,
+    )
+    .join("");
+  const mode = current === "" ? "" : presets.includes(current) ? current : PROXY_CUSTOM_VALUE;
+  $$('input[name="gh-proxy"]', container).forEach((input) => {
+    input.checked = input.value === mode;
+  });
+  $("#proxy-custom-field").classList.toggle("hidden", mode !== PROXY_CUSTOM_VALUE);
+  if (mode === PROXY_CUSTOM_VALUE) $("#proxy-custom-input").value = current;
+  container.onchange = () => {
+    const checked = $('input[name="gh-proxy"]:checked', container);
+    $("#proxy-custom-field").classList.toggle(
+      "hidden",
+      !checked || checked.value !== PROXY_CUSTOM_VALUE,
+    );
+  };
+  updateProxyStatus();
+}
+
+function selectedProxyValue() {
+  const checked = $('input[name="gh-proxy"]:checked');
+  if (!checked) return "";
+  if (checked.value === PROXY_CUSTOM_VALUE) return ($("#proxy-custom-input").value || "").trim();
+  return checked.value;
+}
+
+function updateProxyStatus() {
+  const current = state.proxy.proxy || "";
+  $("#proxy-status").textContent = current ? `当前：${current}` : "当前：直连";
+}
+
+async function saveProxySettings() {
+  const button = $("#proxy-save");
+  button.disabled = true;
+  try {
+    const data = await api("/system/github-proxy", {
+      method: "PUT",
+      body: JSON.stringify({ proxy: selectedProxyValue() }),
+    });
+    state.proxy.proxy = data.proxy || "";
+    renderProxySettings();
+    toast("GitHub 加速设置已保存，立即生效");
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function testProxySettings() {
+  const button = $("#proxy-test-btn");
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "测试中…";
+  try {
+    const data = await api("/system/github-proxy/test", {
+      method: "POST",
+      body: JSON.stringify({ proxy: selectedProxyValue() }),
+    });
+    if (data.ok) {
+      toast(`连通正常（${data.latency_ms}ms）`);
+    } else {
+      toast(data.detail || "连接失败", "error");
+    }
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
 }
 
 async function checkUpdate() {
