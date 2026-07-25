@@ -50,11 +50,13 @@ class UrlValidationTests(unittest.TestCase):
                 normalize_background_url(value)
 
     def test_rejects_css_injection_chars(self) -> None:
-        # 引号与反斜杠会破坏 CSS `url("...")` 上下文，必须拒绝
+        # 引号、反斜杠、尖括号会破坏 CSS url() 或注入到 index.html 的 <style>，必须拒绝
         with self.assertRaises(BackgroundError):
             normalize_background_url('https://example.com/a").x{background:red}')
         with self.assertRaises(BackgroundError):
             normalize_background_url("https://example.com/a\\")
+        with self.assertRaises(BackgroundError):
+            normalize_background_url("https://example.com/a</style><script>")
         with self.assertRaises(BackgroundError):
             normalize_background_url("https://example.com/way-too-long" + "x" * 2200)
 
