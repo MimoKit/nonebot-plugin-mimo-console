@@ -26,6 +26,7 @@ const state = {
   detailPlugin: null,
   detailSource: null,
   background: { source: "default", url: "" },
+  theme: null,
   version: null,
 };
 
@@ -123,6 +124,7 @@ async function bootstrap() {
   bindEvents();
   updateClock();
   setInterval(updateClock, 1000);
+  applyTheme(loadThemeLocal());
   loadBackground();
   try {
     const authStatus = await api("/auth/status");
@@ -173,6 +175,15 @@ function bindEvents() {
   $("#bg-file-input").addEventListener("change", (event) => uploadBgFile(event.target));
   $("#bg-reset").addEventListener("click", resetBg);
   $("#bg-file-label").addEventListener("click", () => $("#bg-file-input").click());
+  $$("input[name='theme-mode']").forEach((radio) =>
+    radio.addEventListener("change", () => changeTheme({ mode: radio.value })),
+  );
+  $$(".accent-swatch[data-accent]").forEach((swatch) =>
+    swatch.addEventListener("click", () => changeTheme({ accent: swatch.dataset.accent })),
+  );
+  $("#accent-custom-input").addEventListener("input", (event) => changeTheme({ accent: event.target.value }));
+  $("#blur-range").addEventListener("input", (event) => changeTheme({ blur: Number(event.target.value) }));
+  $("#theme-reset").addEventListener("click", resetTheme);
   $("#restart-button").addEventListener("click", restartNonebot);
   $("#check-update-btn").addEventListener("click", checkUpdate);
   $$(".view-toggle button").forEach((button) => button.addEventListener("click", () => {
@@ -941,6 +952,82 @@ function resolveBgUrl(data) {
   return DEFAULT_BG_IMAGE;
 }
 
+const THEME_STORAGE_KEY = "mimo-console-theme";
+const THEME_DEFAULTS = { mode: "light", accent: "", blur: 10 };
+let systemThemeMedia = null;
+
+function loadThemeLocal() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(THEME_STORAGE_KEY) || "{}");
+    return {
+      mode: ["light", "dark", "system"].includes(raw.mode) ? raw.mode : THEME_DEFAULTS.mode,
+      accent: /^#[0-9a-fA-F]{6}$/.test(raw.accent || "") ? raw.accent.toLowerCase() : "",
+      blur: Number.isInteger(raw.blur) && raw.blur >= 0 && raw.blur <= 30 ? raw.blur : THEME_DEFAULTS.blur,
+    };
+  } catch (_) {
+    return { ...THEME_DEFAULTS };
+  }
+}
+
+function saveThemeLocal(theme) {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(theme));
+  } catch (_) { /* 存储不可用时仅本次会话生效 */ }
+}
+
+function systemDarkMedia() {
+  if (!systemThemeMedia) systemThemeMedia = matchMedia("(prefers-color-scheme: dark)");
+  return systemThemeMedia;
+}
+
+function applyTheme(theme) {
+  state.theme = theme;
+  const root = document.documentElement;
+  const dark = theme.mode === "dark" || (theme.mode === "system" && systemDarkMedia().matches);
+  if (dark) root.setAttribute("data-theme", "dark");
+  else root.removeAttribute("data-theme");
+  if (theme.accent) root.style.setProperty("--accent", theme.accent);
+  else root.style.removeProperty("--accent");
+  root.style.setProperty("--glass-blur", `${theme.blur}px`);
+  if (theme.mode === "system" && !systemDarkMedia()._mimoBound) {
+    systemDarkMedia()._mimoBound = true;
+    systemDarkMedia().addEventListener("change", () => applyTheme(state.theme || loadThemeLocal()));
+  }
+  if (state.page === "appearance") updateThemeUi(theme);
+}
+
+function changeTheme(patch) {
+  const next = { ...(state.theme || loadThemeLocal()), ...patch };
+  applyTheme(next);
+  saveThemeLocal(next);
+}
+
+function resetTheme() {
+  applyTheme({ ...THEME_DEFAULTS });
+  saveThemeLocal(state.theme);
+  toast("已恢复默认主题");
+}
+
+function updateThemeUi(theme) {
+  const radio = $(`#theme-mode-${theme.mode}`);
+  if (radio) radio.checked = true;
+  $$(".accent-swatch[data-accent]").forEach((swatch) => {
+    swatch.classList.toggle("active", swatch.dataset.accent === theme.accent);
+  });
+  const custom = $(".accent-swatch.custom");
+  const isCustom = !!theme.accent && !$$(".accent-swatch[data-accent]").some((swatch) => swatch.dataset.accent === theme.accent);
+  if (custom) {
+    custom.classList.toggle("active", isCustom);
+    custom.style.background = isCustom ? theme.accent : "";
+  }
+  const colorInput = $("#accent-custom-input");
+  if (colorInput && theme.accent) colorInput.value = theme.accent;
+  const blurRange = $("#blur-range");
+  if (blurRange && Number(blurRange.value) !== theme.blur) blurRange.value = theme.blur;
+  const blurValue = $("#blur-value");
+  if (blurValue) blurValue.textContent = `${theme.blur}px`;
+}
+
 function applyBackground(payload) {
   const data = payload || { source: "default", url: "" };
   state.background = data;
@@ -966,6 +1053,7 @@ async function loadBackground() {
 
 function refreshAppearance() {
   updateAppearanceUi(state.background);
+  updateThemeUi(state.theme || loadThemeLocal());
 }
 
 function updateAppearanceUi(data) {
@@ -1015,8 +1103,10 @@ async function uploadBgFile(input) {
     return;
   }
   const label = $("#bg-file-label");
-  const original = label.textContent;
-  label.textContent = "上传中…";
+  const strong = label.querySelector("strong");
+  const original = strong.textContent;
+  strong.textContent = "上传中…";
+  label.disabled = true;
   try {
     const form = new FormData();
     form.append("file", file);
@@ -1024,8 +1114,9 @@ async function uploadBgFile(input) {
     toast("背景已更新");
   } catch (error) {
     toast(error.message, "error");
-    label.textContent = original;
   } finally {
+    strong.textContent = original;
+    label.disabled = false;
     input.value = "";
   }
 }
