@@ -68,38 +68,28 @@ class GetInstalledVersionTests(unittest.TestCase):
 
 
 class LatestReleaseCacheSnapshotTests(unittest.TestCase):
-    def _cache(self, data: dict) -> LatestReleaseCache:
+    def _cache(self, latest: str) -> LatestReleaseCache:
         cache = LatestReleaseCache()
-        cache._data = data
+        cache._latest = latest
         return cache
 
-    def test_snapshot_strips_v_prefix_and_marks_update(self) -> None:
-        snap = self._cache(
-            {
-                "tag_name": "v0.2.0",
-                "html_url": "https://github.com/MimoKit/nonebot-plugin-mimo-console/releases/tag/v0.2.0",
-                "body": "release notes",
-                "published_at": "2026-08-01T00:00:00Z",
-            }
-        ).snapshot("0.1.0")
+    def test_snapshot_marks_update_when_latest_newer(self) -> None:
+        snap = self._cache("0.2.0").snapshot("0.1.0")
         self.assertEqual(snap["current"], "0.1.0")
         self.assertEqual(snap["latest"], "0.2.0")
         self.assertTrue(snap["has_update"])
-        self.assertTrue(snap["release_url"].endswith("v0.2.0"))
-        self.assertEqual(snap["release_notes"], "release notes")
 
-    def test_snapshot_empty_when_no_release(self) -> None:
-        snap = self._cache({}).snapshot("0.1.0")
+    def test_snapshot_empty_when_no_latest(self) -> None:
+        snap = self._cache("").snapshot("0.1.0")
         self.assertEqual(snap["latest"], "")
         self.assertFalse(snap["has_update"])
-        self.assertEqual(snap["release_url"], "")
 
     def test_snapshot_no_update_on_same_version(self) -> None:
-        snap = self._cache({"tag_name": "0.1.0"}).snapshot("0.1.0")
+        snap = self._cache("0.1.0").snapshot("0.1.0")
         self.assertFalse(snap["has_update"])
 
     def test_snapshot_no_update_when_installed_unknown(self) -> None:
-        snap = self._cache({"tag_name": "0.2.0"}).snapshot("")
+        snap = self._cache("0.2.0").snapshot("")
         self.assertFalse(snap["has_update"])
 
 
