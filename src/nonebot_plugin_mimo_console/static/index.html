@@ -23,7 +23,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./assets/styles.css?v=0.6.1">
+  <link rel="stylesheet" href="./assets/styles.css?v=0.6.3">
 </head>
 <body>
   <div class="bg-glow glow-a"></div>
@@ -115,7 +115,7 @@
           </div>
           <button id="logout-button" class="icon-btn logout-btn" title="退出登录"></button>
         </div>
-        <div class="version">Mimo Console · v0.1.2</div>
+        <div class="version">Mimo Console · v0.1.3</div>
       </div>
     </aside>
 
@@ -229,6 +229,25 @@
             </div>
             <div id="recent-logs" class="recent-logs">
               <div class="empty-state compact">正在等待日志…</div>
+            </div>
+          </article>
+
+          <article class="panel proxy-panel">
+            <div class="panel-head">
+              <h2>GitHub 加速</h2>
+              <button class="btn btn-secondary btn-sm" id="proxy-test-btn" type="button">测试代理连通性</button>
+            </div>
+            <p class="muted proxy-hint">用于控制台自身的版本检测与在线更新，保存后立即生效。</p>
+            <div class="bg-modes" id="proxy-modes"></div>
+            <div id="proxy-custom-field" class="bg-field hidden">
+              <label class="field">
+                <span>自定义加速地址</span>
+                <input id="proxy-custom-input" type="text" autocomplete="off" placeholder="https://gh-proxy.com 或镜像仓库地址">
+              </label>
+            </div>
+            <div class="bg-actions">
+              <button id="proxy-save" class="btn btn-primary" type="button">保存设置</button>
+              <span id="proxy-status" class="muted"></span>
             </div>
           </article>
         </section>
@@ -498,6 +517,6 @@
   </div>
 
   <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
-  <script src="./assets/app.js?v=0.6.1" defer></script>
+  <script src="./assets/app.js?v=0.6.2" defer></script>
 </body>
 </html>

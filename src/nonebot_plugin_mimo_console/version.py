@@ -12,12 +12,71 @@ PACKAGE_GIT_URL = "https://github.com/MimoKit/nonebot-plugin-mimo-console.git"
 MASTER_PYPROJECT_URL = (
     "https://raw.githubusercontent.com/MimoKit/nonebot-plugin-mimo-console/master/pyproject.toml"
 )
+# CNB 镜像仓库（完整仓库地址，与代理前缀二选一）。
+CNB_MIRROR_REPO = "https://cnb.cool/MimokitStudio/nonebot-plugin-mimo-console"
+# 供 WebUI 选择的 GitHub 加速项：gh-proxy 风格前缀 + CNB 镜像；空字符串表示直连。
+GITHUB_PROXY_PRESETS: tuple[str, ...] = (
+    "https://edgeone.gh-proxy.com",
+    "https://hk.gh-proxy.com",
+    "https://gh-proxy.com",
+    "https://gh.llkk.cc",
+    CNB_MIRROR_REPO,
+)
 _TAG_RE = re.compile(r"^v?(\d+\.\d+\.\d+[A-Za-z0-9.+~-]*)$")
 _PYPROJECT_VERSION_RE = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
+_PROXY_SCHEME_RE = re.compile(r"^https?://", re.IGNORECASE)
 
 
 class VersionError(RuntimeError):
     """版本检测相关错误。"""
+
+
+def normalize_github_proxy(value: str) -> str:
+    """校验并规范化 GitHub 加速地址（代理前缀或镜像仓库），空串表示直连；非法值抛 ValueError。"""
+    text = (value or "").strip().rstrip("/")
+    if not text:
+        return ""
+    if (
+        not _PROXY_SCHEME_RE.match(text)
+        or any(char.isspace() for char in text)
+        or "@" in text
+        or "#" in text
+    ):
+        raise ValueError("加速地址必须是合法的 http/https URL")
+    return text
+
+
+def is_mirror_repo(value: str) -> bool:
+    """该加速地址是否为完整镜像仓库地址（而非 gh-proxy 风格的代理前缀）。"""
+    text = value.rstrip("/")
+    return text.endswith(PACKAGE_NAME) or text.endswith(f"{PACKAGE_NAME}.git")
+
+
+def apply_github_proxy(url: str, proxy: str) -> str:
+    """把 GitHub URL 改写成走加速代理前缀的形式；代理为空时原样返回。"""
+    prefix = normalize_github_proxy(proxy)
+    return f"{prefix}/{url}" if prefix else url
+
+
+def resolve_git_url(proxy: str) -> str:
+    """按加速配置返回自更新实际使用的 git 仓库地址。"""
+    prefix = normalize_github_proxy(proxy)
+    if not prefix:
+        return PACKAGE_GIT_URL
+    if is_mirror_repo(prefix):
+        return prefix
+    return f"{prefix}/{PACKAGE_GIT_URL}"
+
+
+def resolve_version_url(proxy: str) -> str:
+    """按加速配置返回版本检测实际读取的 pyproject 地址。"""
+    prefix = normalize_github_proxy(proxy)
+    if not prefix:
+        return MASTER_PYPROJECT_URL
+    if is_mirror_repo(prefix):
+        repo = prefix.removesuffix(".git")
+        return f"{repo}/-/raw/master/pyproject.toml"
+    return f"{prefix}/{MASTER_PYPROJECT_URL}"
 
 
 def get_installed_version() -> str:
@@ -58,14 +117,15 @@ class LatestReleaseCache:
         self._latest: str = ""
         self._fetched_at: float = 0.0
 
-    async def fetch(self, force: bool = False) -> str:
+    async def fetch(self, force: bool = False, proxy: str = "") -> str:
         fresh = self._latest != "" and time.time() - self._fetched_at < self.cache_seconds
         if fresh and not force:
             return self._latest
+        url = resolve_version_url(proxy)
         try:
             async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
                 response = await client.get(
-                    MASTER_PYPROJECT_URL,
+                    url,
                     headers={"User-Agent": PACKAGE_NAME},
                 )
                 response.raise_for_status()

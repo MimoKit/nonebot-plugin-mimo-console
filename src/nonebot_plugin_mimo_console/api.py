@@ -7,6 +7,7 @@ import time
 from collections import defaultdict, deque
 from typing import Annotated, Any, Literal
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -19,7 +20,14 @@ from .runtime import dashboard_snapshot, plugin_snapshot
 from .security import AuthError, Session
 from .state import ConsoleState
 from .store import StoreError, _clean_output, build_self_update_command
-from .version import PACKAGE_GIT_URL, PACKAGE_NAME, get_installed_version
+from .version import (
+    GITHUB_PROXY_PRESETS,
+    PACKAGE_NAME,
+    get_installed_version,
+    normalize_github_proxy,
+    resolve_git_url,
+    resolve_version_url,
+)
 
 
 class SetupBody(BaseModel):
@@ -43,6 +51,10 @@ class BackgroundUrlBody(BaseModel):
 
 class PluginActionBody(BaseModel):
     action: Literal["install", "update", "uninstall"]
+
+
+class GithubProxyBody(BaseModel):
+    proxy: str = Field(default="", max_length=512)
 
 
 class AttemptLimiter:
@@ -312,8 +324,64 @@ def create_router(state: ConsoleState) -> APIRouter:
         session: Annotated[Session, Depends(require_session)],
         force: bool = Query(default=False),
     ) -> dict[str, Any]:
-        await state.release_cache.fetch(force=force)
+        await state.release_cache.fetch(force=force, proxy=state.config.mimo_console_github_proxy)
         return state.release_cache.snapshot(get_installed_version())
+
+    @router.get("/api/system/github-proxy")
+    async def get_github_proxy(
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        return {
+            "proxy": state.config.mimo_console_github_proxy,
+            "presets": list(GITHUB_PROXY_PRESETS),
+        }
+
+    @router.put("/api/system/github-proxy")
+    async def set_github_proxy(
+        body: GithubProxyBody,
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        try:
+            proxy = normalize_github_proxy(body.proxy)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        environment = str(getattr(get_driver().config, "environment", "prod"))
+        path = locate_env_file(state.config.project_root(), environment)
+        try:
+            await asyncio.to_thread(
+                update_env, path, {"MIMO_CONSOLE_GITHUB_PROXY": proxy}, state.backup_dir
+            )
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # 热更新内存配置，无需重启即可生效
+        state.config.mimo_console_github_proxy = proxy
+        logger.info(f"[Mimo Console] GitHub 加速已设置为：{proxy or '直连'}")
+        return {"ok": True, "proxy": proxy}
+
+    @router.post("/api/system/github-proxy/test")
+    async def test_github_proxy(
+        body: GithubProxyBody,
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        try:
+            proxy = normalize_github_proxy(body.proxy)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        url = resolve_version_url(proxy)
+        started = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                response = await client.get(url, headers={"User-Agent": PACKAGE_NAME})
+            latency = int((time.perf_counter() - started) * 1000)
+        except (httpx.HTTPError, OSError) as exc:
+            return {"ok": False, "latency_ms": None, "detail": f"连接失败：{exc}"}
+        if response.status_code != 200:
+            return {
+                "ok": False,
+                "latency_ms": latency,
+                "detail": f"加速地址返回 HTTP {response.status_code}",
+            }
+        return {"ok": True, "latency_ms": latency, "detail": ""}
 
     @router.post("/api/system/update")
     async def system_update(
@@ -324,7 +392,7 @@ def create_router(state: ConsoleState) -> APIRouter:
         command = build_self_update_command(
             state.config.project_root(),
             PACKAGE_NAME,
-            PACKAGE_GIT_URL,
+            resolve_git_url(state.config.mimo_console_github_proxy),
         )
         env = os.environ.copy()
         env.update({"NO_COLOR": "1", "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
