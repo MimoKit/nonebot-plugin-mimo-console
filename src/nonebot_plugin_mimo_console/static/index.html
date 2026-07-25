@@ -3,12 +3,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
   <title>Mimo Console</title>
+  <script>
+    // 首帧前应用本地主题（深浅色/强调色/玻璃强度），避免加载闪烁。
+    (function () {
+      try {
+        var theme = JSON.parse(localStorage.getItem("mimo-console-theme") || "{}");
+        var mode = theme.mode || "light";
+        var dark = mode === "dark" || (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+        var root = document.documentElement;
+        if (dark) root.setAttribute("data-theme", "dark");
+        if (/^#[0-9a-fA-F]{6}$/.test(theme.accent || "")) root.style.setProperty("--accent", theme.accent);
+        var blur = parseInt(theme.blur, 10);
+        if (blur >= 0 && blur <= 30) root.style.setProperty("--glass-blur", blur + "px");
+      } catch (_) { /* 忽略损坏的主题缓存 */ }
+    })();
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./assets/styles.css?v=0.5.1">
+  <link rel="stylesheet" href="./assets/styles.css?v=0.6.1">
 </head>
 <body>
   <div class="bg-glow glow-a"></div>
@@ -337,14 +352,14 @@
           <div class="page-head">
             <div>
               <h1>外观</h1>
-              <p class="muted">自定义 WebUI 背景图，支持远程链接或本地图片</p>
+              <p class="muted">自定义主题（深浅色 / 强调色 / 玻璃强度）与背景图</p>
             </div>
             <span id="bg-status-pill" class="path-pill">当前：默认背景</span>
           </div>
 
           <div class="notice">
             <span class="dot yellow"></span>
-            <strong>自定义背景立即生效、无需重启；仅对当前管理员可见。</strong>
+            <strong>设置立即生效、无需重启；背景图对所有管理员生效，主题仅保存在当前浏览器。</strong>
           </div>
 
           <div class="appearance-grid">
@@ -391,6 +406,53 @@
               </div>
             </article>
           </div>
+
+          <article class="panel theme-panel">
+            <div class="panel-head"><h2>主题</h2><span class="chip">仅保存在当前浏览器</span></div>
+            <div class="theme-groups">
+              <div class="theme-group">
+                <span class="theme-label">模式</span>
+                <div class="bg-modes">
+                  <label class="bg-mode">
+                    <input type="radio" name="theme-mode" value="light" id="theme-mode-light" checked>
+                    <span class="bg-mode-text"><strong>浅色</strong><small>暖纸玻璃风</small></span>
+                  </label>
+                  <label class="bg-mode">
+                    <input type="radio" name="theme-mode" value="dark" id="theme-mode-dark">
+                    <span class="bg-mode-text"><strong>深色</strong><small>暗夜玻璃风</small></span>
+                  </label>
+                  <label class="bg-mode">
+                    <input type="radio" name="theme-mode" value="system" id="theme-mode-system">
+                    <span class="bg-mode-text"><strong>跟随系统</strong><small>随系统外观自动切换</small></span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="theme-group">
+                <span class="theme-label">强调色</span>
+                <div class="accent-swatches" id="accent-swatches">
+                  <button class="accent-swatch" type="button" data-accent="" style="background:#746e69" aria-label="默认灰棕" title="默认灰棕"></button>
+                  <button class="accent-swatch" type="button" data-accent="#758b99" style="background:#758b99" aria-label="雾蓝" title="雾蓝"></button>
+                  <button class="accent-swatch" type="button" data-accent="#718f8a" style="background:#718f8a" aria-label="青绿" title="青绿"></button>
+                  <button class="accent-swatch" type="button" data-accent="#a47f89" style="background:#a47f89" aria-label="藕粉" title="藕粉"></button>
+                  <button class="accent-swatch" type="button" data-accent="#3b9a73" style="background:#3b9a73" aria-label="森绿" title="森绿"></button>
+                  <button class="accent-swatch" type="button" data-accent="#b7802b" style="background:#b7802b" aria-label="暖橙" title="暖橙"></button>
+                  <label class="accent-swatch custom" aria-label="自定义强调色" title="自定义强调色">＋<input type="color" id="accent-custom-input" value="#746e69"></label>
+                </div>
+              </div>
+
+              <div class="theme-group">
+                <span class="theme-label">玻璃强度</span>
+                <div class="blur-row">
+                  <input type="range" id="blur-range" min="0" max="30" step="1" value="10">
+                  <span class="blur-value" id="blur-value">10px</span>
+                </div>
+                <div class="theme-actions">
+                  <button id="theme-reset" class="btn btn-ghost" type="button">恢复默认主题</button>
+                </div>
+              </div>
+            </div>
+          </article>
         </section>
       </div>
     </main>
@@ -436,6 +498,6 @@
   </div>
 
   <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
-  <script src="./assets/app.js?v=0.5.2" defer></script>
+  <script src="./assets/app.js?v=0.6.1" defer></script>
 </body>
 </html>
