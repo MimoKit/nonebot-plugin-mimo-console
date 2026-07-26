@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.util
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -22,6 +25,8 @@ normalize_github_proxy = version.normalize_github_proxy
 is_mirror_repo = version.is_mirror_repo
 resolve_git_url = version.resolve_git_url
 resolve_version_url = version.resolve_version_url
+fetch_mirror_version = version.fetch_mirror_version
+probe_mirror_repo = version.probe_mirror_repo
 
 
 class NormalizeTagTests(unittest.TestCase):
@@ -136,11 +141,44 @@ class GithubProxyTests(unittest.TestCase):
             f"https://gh-proxy.com/{version.MASTER_PYPROJECT_URL}",
         )
 
-    def test_resolve_version_url_mirror(self) -> None:
-        self.assertEqual(
-            resolve_version_url(version.CNB_MIRROR_REPO),
-            f"{version.CNB_MIRROR_REPO}/-/raw/master/pyproject.toml",
+
+class MirrorRepoTests(unittest.TestCase):
+    def _make_repo(self, version_text: str) -> str:
+        """建一个本地 git 仓库冒充镜像，返回其路径（git clone 可直接用）。"""
+        repo = tempfile.mkdtemp(prefix="mimo-test-repo-")
+        subprocess.run(["git", "init", "-q", repo], check=True)
+        Path(repo, "pyproject.toml").write_text(
+            f'[project]\nversion = "{version_text}"\n', encoding="utf-8"
         )
+        subprocess.run(["git", "-C", repo, "add", "pyproject.toml"], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                repo,
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "user.name=t",
+                "commit",
+                "-qm",
+                "init",
+            ],
+            check=True,
+        )
+        return repo
+
+    def test_fetch_mirror_version_reads_pyproject(self) -> None:
+        repo = self._make_repo("9.9.9")
+        self.assertEqual(asyncio.run(fetch_mirror_version(repo)), "9.9.9")
+
+    def test_fetch_mirror_version_bad_repo_returns_empty(self) -> None:
+        self.assertEqual(asyncio.run(fetch_mirror_version("/nonexistent/repo", timeout=10)), "")
+
+    def test_probe_mirror_repo(self) -> None:
+        repo = self._make_repo("1.0.0")
+        self.assertTrue(asyncio.run(probe_mirror_repo(repo)))
+        self.assertFalse(asyncio.run(probe_mirror_repo("/nonexistent/repo", timeout=10)))
 
 
 if __name__ == "__main__":

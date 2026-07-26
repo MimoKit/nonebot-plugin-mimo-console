@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import re
+import tempfile
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -69,14 +72,53 @@ def resolve_git_url(proxy: str) -> str:
 
 
 def resolve_version_url(proxy: str) -> str:
-    """按加速配置返回版本检测实际读取的 pyproject 地址。"""
+    """按加速配置返回版本检测实际读取的 pyproject 地址（仅前缀代理；镜像仓库走 git 协议）。"""
     prefix = normalize_github_proxy(proxy)
-    if not prefix:
-        return MASTER_PYPROJECT_URL
-    if is_mirror_repo(prefix):
-        repo = prefix.removesuffix(".git")
-        return f"{repo}/-/raw/master/pyproject.toml"
-    return f"{prefix}/{MASTER_PYPROJECT_URL}"
+    return f"{prefix}/{MASTER_PYPROJECT_URL}" if prefix else MASTER_PYPROJECT_URL
+
+
+async def run_git(args: list[str], timeout: int) -> tuple[int, bytes]:
+    """运行 git 子进程，返回 (returncode, 输出)；异常或超时返回 (-1, b"")。"""
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *args,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
+    except (OSError, asyncio.TimeoutError):
+        return -1, b""
+    return process.returncode or 0, output
+
+
+async def probe_mirror_repo(repo_url: str, timeout: int = 10) -> bool:
+    """git ls-remote 探测镜像仓库是否匿名可达。"""
+    code, _ = await run_git(["git", "ls-remote", repo_url, "HEAD"], timeout)
+    return code == 0
+
+
+async def fetch_mirror_version(repo_url: str, timeout: int = 30) -> str:
+    """镜像仓库没有 GitHub 式 raw 直链，用稀疏浅克隆只拉 pyproject.toml 读版本号。"""
+    with tempfile.TemporaryDirectory(prefix="mimo-mirror-") as tmp:
+        code, _ = await run_git(
+            ["git", "clone", "--depth", "1", "--filter=blob:none", "--sparse", repo_url, tmp],
+            timeout,
+        )
+        if code != 0:
+            return ""
+        code, _ = await run_git(
+            ["git", "-C", tmp, "sparse-checkout", "set", "--no-cone", "/pyproject.toml"],
+            timeout,
+        )
+        if code != 0:
+            return ""
+        try:
+            text = Path(tmp, "pyproject.toml").read_text(encoding="utf-8")
+        except OSError:
+            return ""
+        match = _PYPROJECT_VERSION_RE.search(text)
+        return match.group(1) if match else ""
 
 
 def get_installed_version() -> str:
@@ -121,7 +163,13 @@ class LatestReleaseCache:
         fresh = self._latest != "" and time.time() - self._fetched_at < self.cache_seconds
         if fresh and not force:
             return self._latest
-        url = resolve_version_url(proxy)
+        prefix = normalize_github_proxy(proxy)
+        if is_mirror_repo(prefix):
+            # 镜像仓库无 raw 直链，走 git 浅克隆；失败保留上次缓存的版本号
+            self._latest = await fetch_mirror_version(prefix) or self._latest
+            self._fetched_at = time.time()
+            return self._latest
+        url = resolve_version_url(prefix)
         try:
             async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
                 response = await client.get(

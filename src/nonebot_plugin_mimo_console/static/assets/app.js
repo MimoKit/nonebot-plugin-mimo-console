@@ -425,6 +425,9 @@ function renderPlugins() {
 }
 
 function loadedPluginHtml(item, index) {
+  const statusBadge = item.disabled
+    ? '<span class="badge disabled">已禁用</span>'
+    : '<span class="badge loaded">运行中</span>';
   return `<article class="plugin-card" data-detail-source="loaded" data-detail-index="${index}" tabindex="0" role="button">
     <div class="plugin-card-head">
       ${pluginAvatarHtml(item)}
@@ -432,7 +435,7 @@ function loadedPluginHtml(item, index) {
         <h3>${escapeHtml(item.title)}</h3>
         <div class="module">${escapeHtml(item.module)}</div>
       </div>
-      <span class="badge loaded">运行中</span>
+      ${statusBadge}
     </div>
     <p class="desc">${escapeHtml(item.description)}</p>
     <div class="plugin-meta">
@@ -584,7 +587,9 @@ function openLoadedDetail(item) {
   setDetailAvatar(item);
   $("#detail-title").textContent = item.title || item.name;
   $("#detail-module").textContent = item.module || "";
-  $("#detail-badges").innerHTML = '<span class="badge loaded">运行中</span>';
+  $("#detail-badges").innerHTML = item.disabled
+    ? '<span class="badge disabled">已禁用</span>'
+    : '<span class="badge loaded">运行中</span>';
   const homepage = safeUrl(item.homepage);
   $("#detail-body").innerHTML = `
     <div class="detail-section">
@@ -604,10 +609,39 @@ function openLoadedDetail(item) {
     ${item.path ? `<div class="detail-section"><h3>路径</h3><p class="detail-desc mono">${escapeHtml(item.path)}</p></div>` : ""}
     ${homepage ? `<div class="detail-section"><h3>链接</h3><div class="detail-links"><a href="${homepage}" target="_blank" rel="noreferrer"><span>主页 / 文档</span><span>↗</span></a></div></div>` : ""}
   `;
-  $("#detail-actions").innerHTML = homepage
-    ? `<a class="btn btn-primary" href="${homepage}" target="_blank" rel="noreferrer">打开主页</a>`
-    : `<button class="btn btn-ghost" type="button" disabled>无主页</button>`;
+  const isSelf = item.module === "nonebot_plugin_mimo_console";
+  const toggleButton = isSelf
+    ? ""
+    : `<button class="btn ${item.disabled ? "btn-secondary" : "btn-danger"}" id="detail-toggle-disabled" type="button">${item.disabled ? "启用插件" : "禁用插件"}</button>`;
+  $("#detail-actions").innerHTML = [
+    homepage ? `<a class="btn btn-primary" href="${homepage}" target="_blank" rel="noreferrer">打开主页</a>` : "",
+    toggleButton,
+  ].join("");
+  const toggle = $("#detail-toggle-disabled");
+  if (toggle) toggle.addEventListener("click", () => togglePluginDisabled(item));
   showDetail(true);
+}
+
+async function togglePluginDisabled(item) {
+  const next = !item.disabled;
+  if (
+    next
+    && !window.confirm(
+      `确定禁用插件「${item.title || item.name}」？\n禁用后它的响应器不再处理消息（插件后台任务不受影响），可随时重新启用。`,
+    )
+  ) return;
+  try {
+    await api("/plugins/disabled", {
+      method: "PUT",
+      body: JSON.stringify({ plugin: item.name, disabled: next }),
+    });
+    item.disabled = next;
+    renderPlugins();
+    openLoadedDetail(item);
+    toast(next ? `已禁用 ${item.title || item.name}` : `已启用 ${item.title || item.name}`);
+  } catch (error) {
+    toast(error.message, "error");
+  }
 }
 
 async function openStoreDetail(item) {
