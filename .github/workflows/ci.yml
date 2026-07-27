@@ -98,3 +98,71 @@ jobs:
         with:
           env_vars: PYTHON
           use_oidc: true
+
+  package:
+    name: Package
+    needs: [prek, typos, basedpyright, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.12"
+          version: latest
+
+      - name: Build distributions
+        run: uv build --no-sources
+
+      - name: Check package metadata
+        run: uvx twine check dist/*
+
+      - name: Check packaged assets
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          wheel = next(Path("dist").glob("*.whl"))
+          required = {
+              "nonebot_plugin_mimo_console/py.typed",
+              "nonebot_plugin_mimo_console/static/index.html",
+              "nonebot_plugin_mimo_console/static/assets/app.js",
+              "nonebot_plugin_mimo_console/static/assets/styles.css",
+          }
+          with ZipFile(wheel) as archive:
+              names = set(archive.namelist())
+          missing = sorted(required - names)
+          if missing:
+              raise SystemExit(f"missing package assets: {missing}")
+          PY
+
+      - name: Test installed wheel
+        run: |
+          uv venv --seed .package-venv
+          uv pip install --python .package-venv/bin/python dist/*.whl
+          .package-venv/bin/python - <<'PY'
+          import nonebot
+
+          nonebot.init(driver="~none")
+          plugin = nonebot.load_plugin("nonebot_plugin_mimo_console")
+          assert plugin is not None
+          assert plugin.metadata is not None
+          assert plugin.metadata.type == "application"
+          PY
+          .package-venv/bin/python - <<'PY'
+          import nonebot
+
+          nonebot.init(driver="~fastapi")
+          plugin = nonebot.load_plugin("nonebot_plugin_mimo_console")
+          assert plugin is not None
+          app = nonebot.get_app()
+          paths = set(app.openapi()["paths"])
+          assert "/mimo-console/api/auth/status" in paths
+          assert any(
+              getattr(route, "path", "") == "/mimo-console/assets"
+              for route in app.routes
+          )
+          PY

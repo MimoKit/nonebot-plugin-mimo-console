@@ -74,13 +74,31 @@ async def _disabled_plugin_guard(matcher: Matcher) -> None:
         raise IgnoredException(f"插件 {plugin_name} 已被 Mimo Console 禁用")
 
 
-app = get_app()
-app.include_router(create_router(console_state), prefix=console_path)
-app.mount(
-    f"{console_path}/assets",
-    StaticFiles(directory=static_dir / "assets"),
-    name="mimo-console-assets",
-)
+def _mount_console() -> bool:
+    try:
+        app = get_app()
+    except AssertionError:
+        app = None
+    if (
+        app is None
+        or not callable(getattr(app, "include_router", None))
+        or not callable(getattr(app, "mount", None))
+    ):
+        logger.warning(
+            "[Mimo Console] 当前 Driver 未提供可用的 ASGI App，插件已加载但 WebUI 未启用；"
+            "请配置 DRIVER=~fastapi"
+        )
+        return False
+    app.include_router(create_router(console_state), prefix=console_path)
+    app.mount(
+        f"{console_path}/assets",
+        StaticFiles(directory=static_dir / "assets"),
+        name="mimo-console-assets",
+    )
+    return True
+
+
+console_mounted = _mount_console()
 
 driver = get_driver()
 console_command = on_command("mimo控制台", aliases={"NoneBot控制台"}, permission=SUPERUSER)
@@ -91,7 +109,10 @@ async def _console_startup() -> None:
     console_state.log_sink_id = logger.add(console_state.logs.sink, level="INFO", catch=True)
     console_state.setup_token = await asyncio.to_thread(console_state.auth.issue_setup_token)
     path = console_config.mimo_console_path
-    logger.success(f"[Mimo Console] WebUI 已挂载：{path}")
+    if console_mounted:
+        logger.success(f"[Mimo Console] WebUI 已挂载：{path}")
+    else:
+        logger.warning("[Mimo Console] WebUI 未挂载，当前 Driver 不支持 ASGI 服务")
     if console_state.setup_token:
         logger.warning("[Mimo Console] 首次初始化令牌（仅本次启动有效）：")
         logger.warning(f"[Mimo Console] {console_state.setup_token}")

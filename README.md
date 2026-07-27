@@ -5,7 +5,7 @@
 
 # Mimo Console
 
-随 NoneBot2 运行的玻璃风 WebUI 管理面板。
+随 NoneBot2 运行的 WebUI 管理面板。
 
 [![PyPI](https://img.shields.io/pypi/v/nonebot-plugin-mimo-console.svg)](https://pypi.org/project/nonebot-plugin-mimo-console/)
 [![Python](https://img.shields.io/badge/Python-3.10%20--%203.14-3776ab?logo=python&logoColor=white)](https://www.python.org/)
@@ -42,6 +42,13 @@ uv add nonebot-plugin-mimo-console
 # pip install nonebot-plugin-mimo-console
 ```
 
+使用 uv 或 pip 安装后，请确认 NoneBot 项目的 `pyproject.toml` 已加载插件：
+
+```toml
+[tool.nonebot]
+plugins = ["nonebot_plugin_mimo_console"]
+```
+
 项目需要启用 FastAPI 驱动：
 
 ```dotenv
@@ -69,6 +76,7 @@ http://127.0.0.1:8080/mimo-console/
 | `MIMO_CONSOLE_ALLOW_PACKAGE_MANAGEMENT` | `true` | 允许安装、更新和卸载插件 |
 | `MIMO_CONSOLE_STORE_CACHE_SECONDS` | `600` | 商店数据缓存时间 |
 | `MIMO_CONSOLE_PACKAGE_TIMEOUT` | `300` | 插件操作超时时间（秒） |
+| `MIMO_CONSOLE_GITHUB_PROXY` | 空 | GitHub 加速前缀或镜像仓库地址，用于 README、版本检查和自更新 |
 
 超级用户也可以发送 `mimo控制台` 或 `NoneBot控制台` 获取访问地址。
 
@@ -80,11 +88,14 @@ http://127.0.0.1:8080/mimo-console/
 
 ## 数据与安全
 
+- Mimo Console 具有修改 dotenv、管理 Python 包、查看日志、禁用插件响应器和触发进程重启等高权限能力，其权限等同于运行 NoneBot 的系统用户。
+- 不建议将 WebUI 直接暴露到公网；确需公网访问时，应在反向代理层启用 HTTPS、来源限制或额外认证。
+- 不需要在线安装、更新和卸载插件时，建议设置 `MIMO_CONSOLE_ALLOW_PACKAGE_MANAGEMENT=false`。
 - 管理员数据由 `nonebot-plugin-localstore` 保存，不会写进插件安装目录。
 - Token、Secret、Password、Cookie、API Key 等配置值默认脱敏。
-- 配置修改会生成备份，重启 NoneBot 后生效。
+- 配置修改会生成备份，重启 NoneBot 后生效；修改项目配置和依赖前仍建议自行备份。
 - 自定义背景图保存在 localstore 数据目录，上传文件名随机化；远程 URL 仅允许 http/https，浏览器端加载，不做服务端可达性校验。
-- 公网部署建议在反向代理层启用 HTTPS 和额外访问限制。
+- “禁用插件”只会阻止对应插件的 Matcher 继续响应事件，不会停止其已注册的后台任务；Mimo Console 自身不可被禁用。
 
 ## 本地开发
 
