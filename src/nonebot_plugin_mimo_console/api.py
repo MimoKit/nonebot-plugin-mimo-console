@@ -267,9 +267,8 @@ def create_router(state: ConsoleState) -> APIRouter:
         if not homepage:
             return {"ok": False, "content": "", "detail": "该插件未提供主页链接"}
         import re as _re
-        match = _re.match(
-            r"https?://github\.com/([^/]+)/([^/?#]+)", homepage
-        )
+
+        match = _re.match(r"https?://github\.com/([^/]+)/([^/?#]+)", homepage)
         if not match:
             return {"ok": False, "content": "", "detail": "主页不是 GitHub 仓库，无法获取 README"}
         owner, repo = match.group(1), match.group(2).removesuffix(".git")
@@ -282,7 +281,9 @@ def create_router(state: ConsoleState) -> APIRouter:
                     if proxy and not is_mirror_repo(proxy):
                         raw_url = f"{proxy}https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{filename}"
                     else:
-                        raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{filename}"
+                        raw_url = (
+                            f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{filename}"
+                        )
                     try:
                         resp = await client.get(
                             raw_url,

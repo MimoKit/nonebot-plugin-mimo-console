@@ -68,6 +68,26 @@ class StoreTests(unittest.TestCase):
             command[-1], "git+https://github.com/MimoKit/nonebot-plugin-mimo-console.git"
         )
 
+    def test_build_self_update_command_uses_pip_for_prefix_proxy(self) -> None:
+        # gh-proxy 风格前缀会把代理前缀拼在 GitHub URL 前，形成含多个 "://" 的套娃
+        # URL（如 https://gh-proxy.com/https://github.com/...）。即便项目用 uv 管理，
+        # 此种 URL 也必须走 pip——uv 解析 "git+<套娃URL>@<ref>" 会让解析器 panic。
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "pyproject.toml").write_text("[project]\nname='bot'\n", encoding="utf-8")
+            command = store.build_self_update_command(
+                root,
+                "nonebot-plugin-mimo-console",
+                "https://gh-proxy.com/https://github.com/MimoKit/nonebot-plugin-mimo-console.git",
+                uv_executable="/usr/bin/uv",
+            )
+        self.assertNotEqual(command[0], "/usr/bin/uv")
+        self.assertEqual(command[:4], [sys.executable, "-m", "pip", "install"])
+        self.assertEqual(
+            command[-1],
+            "git+https://gh-proxy.com/https://github.com/MimoKit/nonebot-plugin-mimo-console.git",
+        )
+
     def test_registry_item_validation(self) -> None:
         valid = {
             "module_name": "nonebot_plugin_status",
