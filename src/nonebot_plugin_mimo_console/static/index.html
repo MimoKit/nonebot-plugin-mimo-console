@@ -22,6 +22,7 @@
   <link rel="stylesheet" href="./assets/styles.css?v=1.0.0">
 </head>
 <body>
+  <div id="bg-layer" class="bg-layer"></div>
   <section id="auth-screen" class="auth-screen">
     <div class="auth-container">
       <div class="auth-header">
@@ -411,7 +412,7 @@
               <h1>外观</h1>
               <p class="text-muted">自定义主题与背景图</p>
             </div>
-            <span id="bg-status-pill" class="badge-outline">当前：默认背景</span>
+            <span id="bg-status-pill" class="badge-outline">当前：无背景</span>
           </div>
 
           <div class="notice info">
@@ -421,7 +422,7 @@
 
           <div class="appearance-grid">
             <article class="card">
-              <div class="card-header"><h2>预览</h2><span class="badge" id="bg-source-chip">默认背景</span></div>
+              <div class="card-header"><h2>预览</h2><span class="badge" id="bg-source-chip">无背景</span></div>
               <div id="bg-preview" class="bg-preview empty"></div>
             </article>
 
@@ -429,8 +430,8 @@
               <div class="card-header"><h2>背景来源</h2></div>
               <div class="radio-group">
                 <label class="radio-option">
-                  <input type="radio" name="bg-mode" value="default" id="bg-mode-default" checked>
-                  <div><strong>默认背景</strong><small>使用内置背景图</small></div>
+                  <input type="radio" name="bg-mode" value="none" id="bg-mode-none" checked>
+                  <div><strong>无背景</strong><small>使用干净的纯色页面背景</small></div>
                 </label>
                 <label class="radio-option">
                   <input type="radio" name="bg-mode" value="url" id="bg-mode-url">
@@ -458,8 +459,20 @@
                 <input id="bg-file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden>
               </div>
 
+              <div class="visual-settings">
+                <label class="range-setting" for="bg-blur-input">
+                  <span><strong>背景模糊</strong><output id="bg-blur-value">0 px</output></span>
+                  <input id="bg-blur-input" type="range" min="0" max="24" step="1" value="0">
+                </label>
+                <label class="range-setting" for="card-opacity-input">
+                  <span><strong>卡片透明度</strong><output id="card-opacity-value">92%</output></span>
+                  <input id="card-opacity-input" type="range" min="50" max="100" step="1" value="92">
+                </label>
+                <small class="visual-settings-hint">仅在使用自定义背景图时生效，并保存在当前浏览器。</small>
+              </div>
+
               <div class="action-row">
-                <button id="bg-reset" class="btn btn-ghost btn-sm" type="button">恢复默认</button>
+                <button id="bg-reset" class="btn btn-ghost btn-sm" type="button">清除背景</button>
               </div>
             </article>
           </div>

@@ -57,7 +57,6 @@ console_state = ConsoleState(
     background=BackgroundStore(
         data_file=localstore.get_plugin_data_file("background.json"),
         image_dir=localstore.get_plugin_data_dir() / "backgrounds",
-        default_url=console_config.mimo_console_background_url,
     ),
     release_cache=LatestReleaseCache(),
     disabled=DisabledStore(

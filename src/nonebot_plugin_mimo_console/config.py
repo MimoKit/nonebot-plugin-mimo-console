@@ -17,7 +17,6 @@ class ConsoleConfig(BaseModel):
     mimo_console_allow_package_management: bool = True
     mimo_console_store_cache_seconds: int = Field(default=600, ge=60, le=86400)
     mimo_console_package_timeout: int = Field(default=300, ge=60, le=1800)
-    mimo_console_background_url: str | None = None
     mimo_console_github_proxy: str = ""
 
     @field_validator("mimo_console_path")

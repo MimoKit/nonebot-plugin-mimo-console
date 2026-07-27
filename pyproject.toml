@@ -1,7 +1,7 @@
 [project]
 name = "nonebot-plugin-mimo-console"
 version = "0.1.5"
-description = "A glass-style WebUI management console for NoneBot2"
+description = "A premium WebUI management console for NoneBot2"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "GPL-3.0-only"

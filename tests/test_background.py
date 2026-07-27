@@ -50,13 +50,17 @@ class UrlValidationTests(unittest.TestCase):
                 normalize_background_url(value)
 
     def test_rejects_css_injection_chars(self) -> None:
-        # 引号、反斜杠、尖括号会破坏 CSS url() 或注入到 index.html 的 <style>，必须拒绝
-        with self.assertRaises(BackgroundError):
-            normalize_background_url('https://example.com/a").x{background:red}')
-        with self.assertRaises(BackgroundError):
-            normalize_background_url("https://example.com/a\\")
-        with self.assertRaises(BackgroundError):
-            normalize_background_url("https://example.com/a</style><script>")
+        for value in (
+            'https://example.com/a").x{background:red}',
+            "https://example.com/a\\",
+            "https://example.com/a</style><script>",
+            "https://example.com/a\n}body{display:none}/*",
+            "https://example.com/a\rheader:value",
+            "https://example.com/a\x00b",
+            "https://example.com/a\x7fb",
+        ):
+            with self.subTest(value=value), self.assertRaises(BackgroundError):
+                normalize_background_url(value)
         with self.assertRaises(BackgroundError):
             normalize_background_url("https://example.com/way-too-long" + "x" * 2200)
 
@@ -93,24 +97,6 @@ class UploadFilenameTests(unittest.TestCase):
 
 
 class BackgroundStoreTests(unittest.TestCase):
-    def test_default_url_is_normalized(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            store = BackgroundStore(
-                Path(temp) / "bg.json",
-                Path(temp) / "imgs",
-                default_url="https://example.com/x.jpg",
-            )
-            self.assertEqual(store.default_url, "https://example.com/x.jpg")
-
-    def test_invalid_default_url_is_dropped(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            store = BackgroundStore(
-                Path(temp) / "bg.json",
-                Path(temp) / "imgs",
-                default_url="javascript:alert(1)",
-            )
-            self.assertEqual(store.default_url, "")
-
     def test_set_url_persists_across_reload(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             data_file = Path(temp) / "bg.json"

@@ -342,7 +342,7 @@ def create_router(state: ConsoleState) -> APIRouter:
                 "source": "upload",
                 "url": f"{state.config.mimo_console_path}/api/background/file/{snap['filename']}",
             }
-        return {"source": "default", "url": state.background.default_url}
+        return {"source": "none", "url": ""}
 
     @router.get("/api/background")
     async def get_background() -> dict[str, Any]:
@@ -381,9 +381,9 @@ def create_router(state: ConsoleState) -> APIRouter:
     @router.delete("/api/background")
     async def clear_background(
         session: Annotated[Session, Depends(require_session)],
-    ) -> dict[str, bool]:
-        await asyncio.to_thread(state.background.clear)
-        return {"ok": True}
+    ) -> dict[str, Any]:
+        snap = await asyncio.to_thread(state.background.clear)
+        return background_payload(snap)
 
     @router.get("/api/background/file/{filename}")
     async def serve_background_file(filename: str) -> FileResponse:
@@ -551,12 +551,6 @@ def create_router(state: ConsoleState) -> APIRouter:
     @router.get("/", include_in_schema=False)
     async def index_page() -> HTMLResponse:
         html = index.read_text(encoding="utf-8")
-        payload = background_payload(state.background.snapshot())
-        if payload.get("url"):
-            # 登录页未登录，无法走前端 fetch，直接把当前背景注入 <style>。
-            # url 已由 normalize_background_url 校验（禁 " \ < >），可安全注入 CSS/HTML。
-            inject = '<style>:root{--bg-image:url("' + payload["url"] + '")}</style>'
-            html = html.replace("</head>", inject + "</head>", 1)
         return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
     return router

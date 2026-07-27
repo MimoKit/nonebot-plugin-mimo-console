@@ -69,7 +69,6 @@ http://127.0.0.1:8080/mimo-console/
 | `MIMO_CONSOLE_ALLOW_PACKAGE_MANAGEMENT` | `true` | 允许安装、更新和卸载插件 |
 | `MIMO_CONSOLE_STORE_CACHE_SECONDS` | `600` | 商店数据缓存时间 |
 | `MIMO_CONSOLE_PACKAGE_TIMEOUT` | `300` | 插件操作超时时间（秒） |
-| `MIMO_CONSOLE_BACKGROUND_URL` | 空 | 默认背景图的远程 URL（可选，http/https）；运行时也可在外观页修改 |
 
 超级用户也可以发送 `mimo控制台` 或 `NoneBot控制台` 获取访问地址。
 

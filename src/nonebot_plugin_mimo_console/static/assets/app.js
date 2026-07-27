@@ -25,7 +25,7 @@ const state = {
   timers: [],
   detailPlugin: null,
   detailSource: null,
-  background: { source: "default", url: "" },
+  background: { source: "none", url: "" },
   theme: null,
   version: null,
   proxy: { proxy: "", presets: [] },
@@ -126,6 +126,7 @@ async function bootstrap() {
   updateClock();
   setInterval(updateClock, 1000);
   applyTheme(loadThemeLocal());
+  applyVisualSettings(loadVisualSettings());
   loadBackground();
   try {
     const authStatus = await api("/auth/status");
@@ -176,6 +177,8 @@ function bindEvents() {
   $("#bg-file-input").addEventListener("change", (event) => uploadBgFile(event.target));
   $("#bg-reset").addEventListener("click", resetBg);
   $("#bg-file-label").addEventListener("click", () => $("#bg-file-input").click());
+  $("#bg-blur-input").addEventListener("input", updateVisualSettings);
+  $("#card-opacity-input").addEventListener("input", updateVisualSettings);
   $$("input[name='theme-mode']").forEach((radio) =>
     radio.addEventListener("change", () => changeTheme({ mode: radio.value })),
   );
@@ -981,16 +984,52 @@ async function clearLogs() {
   }
 }
 
-const BG_SOURCE_LABELS = { default: "默认背景", url: "远程链接", upload: "本地上传" };
-
-const DEFAULT_BG_IMAGE = `${rootPath}/assets/status-bg.jpg`;
+const BG_SOURCE_LABELS = { none: "无背景", url: "远程链接", upload: "本地上传" };
+const VISUAL_STORAGE_KEY = "mimo-console-visual";
+const VISUAL_DEFAULTS = { blur: 0, opacity: 92 };
 
 function resolveBgUrl(data) {
-  const source = (data && data.source) || "default";
+  const source = (data && data.source) || "none";
   const url = (data && data.url) || "";
-  if ((source === "url" || source === "upload") && url) return url;
-  if (source === "default" && url) return url;
-  return DEFAULT_BG_IMAGE;
+  return (source === "url" || source === "upload") && url ? url : "";
+}
+
+function loadVisualSettings() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(VISUAL_STORAGE_KEY) || "{}");
+    return {
+      blur: Math.min(24, Math.max(0, Number(raw.blur) || 0)),
+      opacity: Math.min(100, Math.max(50, Number(raw.opacity) || VISUAL_DEFAULTS.opacity)),
+    };
+  } catch (_) {
+    return { ...VISUAL_DEFAULTS };
+  }
+}
+
+function applyVisualSettings(settings, save = false) {
+  const root = document.documentElement;
+  const blur = Math.min(24, Math.max(0, Number(settings.blur) || 0));
+  const opacity = Math.min(100, Math.max(50, Number(settings.opacity) || VISUAL_DEFAULTS.opacity));
+  root.style.setProperty("--blur-intensity", `${blur}px`);
+  root.style.setProperty("--card-opacity", `${opacity}%`);
+  const blurInput = $("#bg-blur-input");
+  const opacityInput = $("#card-opacity-input");
+  if (blurInput) blurInput.value = String(blur);
+  if (opacityInput) opacityInput.value = String(opacity);
+  const blurValue = $("#bg-blur-value");
+  const opacityValue = $("#card-opacity-value");
+  if (blurValue) blurValue.textContent = `${blur} px`;
+  if (opacityValue) opacityValue.textContent = `${opacity}%`;
+  if (save) {
+    try { localStorage.setItem(VISUAL_STORAGE_KEY, JSON.stringify({ blur, opacity })); } catch (_) { /* ignore */ }
+  }
+}
+
+function updateVisualSettings() {
+  applyVisualSettings({
+    blur: $("#bg-blur-input").value,
+    opacity: $("#card-opacity-input").value,
+  }, true);
 }
 
 const THEME_STORAGE_KEY = "mimo-console-theme";
@@ -1091,8 +1130,14 @@ function updateThemeUi(theme) {
 }
 
 function applyBackground(payload) {
-  const data = payload || { source: "default", url: "" };
+  const data = payload && ["none", "url", "upload"].includes(payload.source)
+    ? payload
+    : { source: "none", url: "" };
+  const bgUrl = resolveBgUrl(data);
   state.background = data;
+  document.documentElement.classList.toggle("has-custom-bg", Boolean(bgUrl));
+  const layer = $("#bg-layer");
+  if (layer) layer.style.backgroundImage = bgUrl ? `url("${bgUrl}")` : "none";
   if (state.page === "appearance") updateAppearanceUi(data);
 }
 
@@ -1100,29 +1145,31 @@ async function loadBackground() {
   try {
     applyBackground(await api("/background"));
   } catch (_) {
-    applyBackground({ source: "default", url: "" });
+    applyBackground({ source: "none", url: "" });
   }
 }
 
 function refreshAppearance() {
   updateAppearanceUi(state.background);
   updateThemeUi(state.theme || loadThemeLocal());
+  applyVisualSettings(loadVisualSettings());
 }
 
 function updateAppearanceUi(data) {
-  const source = data.source || "default";
+  const source = data.source || "none";
   const radio = $(`#bg-mode-${source}`);
   if (radio) radio.checked = true;
   switchBgMode(source);
+  const label = BG_SOURCE_LABELS[source] || "无背景";
   const chip = $("#bg-source-chip");
   const pill = $("#bg-status-pill");
-  if (chip) chip.textContent = BG_SOURCE_LABELS[source] || "默认背景";
-  if (pill) pill.textContent = `当前：${BG_SOURCE_LABELS[source] || "默认背景"}`;
+  if (chip) chip.textContent = label;
+  if (pill) pill.textContent = `当前：${label}`;
   const preview = $("#bg-preview");
   if (preview) {
     const bgUrl = resolveBgUrl(data);
-    preview.style.backgroundImage = `url("${bgUrl}")`;
-    preview.classList.remove("empty");
+    preview.style.backgroundImage = bgUrl ? `url("${bgUrl}")` : "none";
+    preview.classList.toggle("empty", !bgUrl);
   }
   const urlInput = $("#bg-url-input");
   if (urlInput && source === "url" && data.url) urlInput.value = data.url;
@@ -1181,7 +1228,7 @@ async function resetBg() {
   try {
     applyBackground(await api("/background", { method: "DELETE" }));
     $("#bg-url-input").value = "";
-    toast("已恢复默认背景");
+    toast("背景已清除");
   } catch (error) {
     toast(error.message, "error");
   } finally {

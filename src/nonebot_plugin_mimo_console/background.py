@@ -31,14 +31,14 @@ class BackgroundError(ValueError):
 
 
 def normalize_background_url(url: str) -> str:
-    """校验远程背景 URL：必须是 http/https 且不含会破坏 CSS url() 的字符。"""
+    """校验远程背景 URL：必须是 http/https 且不含危险字符。"""
     text = (url or "").strip()
     if not text:
         raise BackgroundError("背景 URL 不能为空")
     if len(text) > URL_MAX_LENGTH:
         raise BackgroundError("背景 URL 过长")
-    # 在 CSS `url("...")` 和注入到 index.html 的 <style> 上下文里，
-    # 引号/反斜杠会闭合或转义，尖括号会破坏 HTML，全部禁掉。
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in text):
+        raise BackgroundError("背景 URL 含有不被允许的控制字符")
     if any(ch in text for ch in ('"', "\\", "<", ">")):
         raise BackgroundError("背景 URL 含有不被允许的字符")
     try:
@@ -74,22 +74,11 @@ class BackgroundStore:
         self,
         data_file: Path,
         image_dir: Path,
-        default_url: str | None = None,
     ) -> None:
         self.data_file = data_file
         self.image_dir = image_dir
-        self.default_url = self._safe_default(default_url)
         self._lock = RLock()
         self._data = self._read()
-
-    @staticmethod
-    def _safe_default(default_url: str | None) -> str:
-        if not default_url:
-            return ""
-        try:
-            return normalize_background_url(default_url)
-        except BackgroundError:
-            return ""
 
     def _read(self) -> dict[str, Any]:
         if not self.data_file.is_file():
