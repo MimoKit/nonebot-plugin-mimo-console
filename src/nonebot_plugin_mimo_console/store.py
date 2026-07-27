@@ -106,7 +106,17 @@ def build_self_update_command(
     if not SAFE_NAME_RE.fullmatch(project_name):
         raise ValueError("插件包名不合法")
     uv = uv_executable if uv_executable is not None else _find_uv_executable()
-    if uv and (project_root / "pyproject.toml").is_file():
+    # gh-proxy 风格前缀会把代理前缀拼在 GitHub URL 之前，形成含多个 "://" 的套娃 URL
+    # （如 https://gh-proxy.com/https://github.com/...）。uv 解析
+    # "git+<套娃URL>@<ref>" 时其 URL 解析器会 panic（AmbiguousAuthority），
+    # 而 pip 直接交给 git clone，对套娃 URL 鲁棒。因此前缀代理走 pip；
+    # 干净 URL（直连或 CNB 镜像仓库地址）仍走 uv。
+    is_prefix_proxy_url = git_url.count("://") > 1
+    if (
+        uv
+        and (project_root / "pyproject.toml").is_file()
+        and not is_prefix_proxy_url
+    ):
         return [
             uv,
             "add",
