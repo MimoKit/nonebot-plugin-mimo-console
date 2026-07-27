@@ -179,11 +179,10 @@ function bindEvents() {
   $$("input[name='theme-mode']").forEach((radio) =>
     radio.addEventListener("change", () => changeTheme({ mode: radio.value })),
   );
-  $$(".accent-swatch[data-accent]").forEach((swatch) =>
+  $$(".swatch[data-accent]").forEach((swatch) =>
     swatch.addEventListener("click", () => changeTheme({ accent: swatch.dataset.accent })),
   );
   $("#accent-custom-input").addEventListener("input", (event) => changeTheme({ accent: event.target.value }));
-  $("#blur-range").addEventListener("input", (event) => changeTheme({ blur: Number(event.target.value) }));
   $("#theme-reset").addEventListener("click", resetTheme);
   $("#restart-button").addEventListener("click", restartNonebot);
   $("#check-update-btn").addEventListener("click", checkUpdate);
@@ -390,7 +389,7 @@ async function loadDashboard(showErrors = true) {
     $("#sidebar-uptime").textContent = `已运行 ${formatUptime(system.uptime)}`;
     $("#bot-list").innerHTML = data.bots.length
       ? data.bots.map((bot) => `<div class="bot-chip"><strong>${escapeHtml(bot.id)}</strong><span>${escapeHtml(bot.adapter)}</span></div>`).join("")
-      : '<div class="empty-mini">暂无机器人连接</div>';
+      : '<div class="empty-text">暂无机器人连接</div>';
   } catch (error) {
     if (showErrors) toast(error.message, "error");
   }
@@ -612,7 +611,7 @@ function openLoadedDetail(item) {
   const isSelf = item.module === "nonebot_plugin_mimo_console";
   const toggleButton = isSelf
     ? ""
-    : `<button class="btn ${item.disabled ? "btn-secondary" : "btn-danger"}" id="detail-toggle-disabled" type="button">${item.disabled ? "启用插件" : "禁用插件"}</button>`;
+    : `<button class="btn ${item.disabled ? "btn-ghost" : "btn-danger"}" id="detail-toggle-disabled" type="button">${item.disabled ? "启用插件" : "禁用插件"}</button>`;
   $("#detail-actions").innerHTML = [
     homepage ? `<a class="btn btn-primary" href="${homepage}" target="_blank" rel="noreferrer">打开主页</a>` : "",
     toggleButton,
@@ -695,7 +694,7 @@ function renderStoreDetail(item) {
   $("#detail-badges").innerHTML = [
     item.official ? '<span class="badge official">官方</span>' : "",
     item.installed ? '<span class="badge installed">已安装</span>' : "",
-    item.valid === false ? '<span class="badge" style="color:var(--yellow);background:rgba(232,197,106,.12)">未通过检查</span>' : "",
+    item.valid === false ? '<span class="badge" style="color:var(--color-yellow);background:rgba(245,158,11,.12)">未通过检查</span>' : "",
   ].join("");
 
   $("#detail-body").innerHTML = `
@@ -730,6 +729,10 @@ function renderStoreDetail(item) {
         <a href="https://pypi.org/project/${encodeURIComponent(item.project_link || "")}/" target="_blank" rel="noreferrer"><span>PyPI</span><span>↗</span></a>
       </div>
     </div>
+    <div class="detail-section">
+      <h3>文档</h3>
+      <div id="detail-readme"><div class="empty-text">正在加载 README…</div></div>
+    </div>
   `;
 
   const moduleName = item.module_name;
@@ -752,6 +755,7 @@ function renderStoreDetail(item) {
   $$("[data-plugin-action]", $("#detail-actions")).forEach((button) => {
     button.addEventListener("click", () => manageStorePlugin(button));
   });
+  loadPluginReadme(moduleName);
 }
 
 function showDetail(show) {
@@ -940,7 +944,7 @@ function renderRecentLogs() {
     ? items.map((item) =>
       `<div class="recent-line"><time>${new Date(item.time).toLocaleTimeString("zh-CN", { hour12: false })}</time><span class="level ${escapeHtml(item.level)}">${escapeHtml(item.level)}</span><p>${escapeHtml(item.message)}</p></div>`,
     ).join("")
-    : '<div class="empty-state compact">正在等待日志…</div>';
+    : '<div class="empty-text">正在等待日志…</div>';
 }
 
 function renderLogs() {
@@ -985,12 +989,12 @@ function resolveBgUrl(data) {
   const source = (data && data.source) || "default";
   const url = (data && data.url) || "";
   if ((source === "url" || source === "upload") && url) return url;
-  if (source === "default" && url) return url; // 来自 env MIMO_CONSOLE_BACKGROUND_URL
+  if (source === "default" && url) return url;
   return DEFAULT_BG_IMAGE;
 }
 
 const THEME_STORAGE_KEY = "mimo-console-theme";
-const THEME_DEFAULTS = { mode: "light", accent: "", blur: 10 };
+const THEME_DEFAULTS = { mode: "light", accent: "" };
 let systemThemeMedia = null;
 
 function loadThemeLocal() {
@@ -999,7 +1003,6 @@ function loadThemeLocal() {
     return {
       mode: ["light", "dark", "system"].includes(raw.mode) ? raw.mode : THEME_DEFAULTS.mode,
       accent: /^#[0-9a-fA-F]{6}$/.test(raw.accent || "") ? raw.accent.toLowerCase() : "",
-      blur: Number.isInteger(raw.blur) && raw.blur >= 0 && raw.blur <= 30 ? raw.blur : THEME_DEFAULTS.blur,
     };
   } catch (_) {
     return { ...THEME_DEFAULTS };
@@ -1017,15 +1020,41 @@ function systemDarkMedia() {
   return systemThemeMedia;
 }
 
+function hexToHsl(hex) {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l };
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h;
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+  else if (max === g) h = ((b - r) / d + 2) / 6;
+  else h = ((r - g) / d + 4) / 6;
+  return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
+}
+
 function applyTheme(theme) {
   state.theme = theme;
   const root = document.documentElement;
   const dark = theme.mode === "dark" || (theme.mode === "system" && systemDarkMedia().matches);
   if (dark) root.setAttribute("data-theme", "dark");
   else root.removeAttribute("data-theme");
-  if (theme.accent) root.style.setProperty("--accent", theme.accent);
-  else root.style.removeProperty("--accent");
-  root.style.setProperty("--glass-blur", `${theme.blur}px`);
+  if (theme.accent) {
+    root.style.setProperty("--accent", theme.accent);
+    const hsl = hexToHsl(theme.accent);
+    const hoverL = Math.max(0, hsl.l - 8);
+    root.style.setProperty("--accent-hover", `hsl(${hsl.h}, ${hsl.s}%, ${hoverL}%)`);
+    root.style.setProperty("--accent-soft", `hsla(${hsl.h}, ${hsl.s}%, ${hsl.l}%, ${dark ? 0.12 : 0.08})`);
+    root.style.setProperty("--accent-line", `hsla(${hsl.h}, ${hsl.s}%, ${hsl.l}%, ${dark ? 0.28 : 0.22})`);
+  } else {
+    root.style.removeProperty("--accent");
+    root.style.removeProperty("--accent-hover");
+    root.style.removeProperty("--accent-soft");
+    root.style.removeProperty("--accent-line");
+  }
   if (theme.mode === "system" && !systemDarkMedia()._mimoBound) {
     systemDarkMedia()._mimoBound = true;
     systemDarkMedia().addEventListener("change", () => applyTheme(state.theme || loadThemeLocal()));
@@ -1048,35 +1077,22 @@ function resetTheme() {
 function updateThemeUi(theme) {
   const radio = $(`#theme-mode-${theme.mode}`);
   if (radio) radio.checked = true;
-  $$(".accent-swatch[data-accent]").forEach((swatch) => {
+  $$(".swatch[data-accent]").forEach((swatch) => {
     swatch.classList.toggle("active", swatch.dataset.accent === theme.accent);
   });
-  const custom = $(".accent-swatch.custom");
-  const isCustom = !!theme.accent && !$$(".accent-swatch[data-accent]").some((swatch) => swatch.dataset.accent === theme.accent);
+  const custom = $(".swatch.custom");
+  const isCustom = !!theme.accent && !$$(".swatch[data-accent]").some((swatch) => swatch.dataset.accent === theme.accent);
   if (custom) {
     custom.classList.toggle("active", isCustom);
     custom.style.background = isCustom ? theme.accent : "";
   }
   const colorInput = $("#accent-custom-input");
   if (colorInput && theme.accent) colorInput.value = theme.accent;
-  const blurRange = $("#blur-range");
-  if (blurRange && Number(blurRange.value) !== theme.blur) blurRange.value = theme.blur;
-  const blurValue = $("#blur-value");
-  if (blurValue) blurValue.textContent = `${theme.blur}px`;
 }
 
 function applyBackground(payload) {
   const data = payload || { source: "default", url: "" };
   state.background = data;
-  const root = document.documentElement;
-  const bgUrl = resolveBgUrl(data);
-  // CSS `--bg-image` 仅替换默认背景图层，遮罩与兜底色由 styles.css 保留。
-  // 内置 status-bg.jpg 本就是 CSS 默认值，无需注入 --bg-image。
-  if (bgUrl && bgUrl !== DEFAULT_BG_IMAGE) {
-    root.style.setProperty("--bg-image", `url("${bgUrl}")`);
-  } else {
-    root.style.removeProperty("--bg-image");
-  }
   if (state.page === "appearance") updateAppearanceUi(data);
 }
 
@@ -1104,7 +1120,8 @@ function updateAppearanceUi(data) {
   if (pill) pill.textContent = `当前：${BG_SOURCE_LABELS[source] || "默认背景"}`;
   const preview = $("#bg-preview");
   if (preview) {
-    preview.style.backgroundImage = `url("${resolveBgUrl(data)}")`;
+    const bgUrl = resolveBgUrl(data);
+    preview.style.backgroundImage = `url("${bgUrl}")`;
     preview.classList.remove("empty");
   }
   const urlInput = $("#bg-url-input");
@@ -1208,9 +1225,9 @@ function renderProxySettings() {
   ];
   container.innerHTML = options
     .map(
-      (opt) => `<label class="bg-mode">
+      (opt) => `<label class="radio-option">
         <input type="radio" name="gh-proxy" value="${escapeHtml(opt.value)}"${opt.value === "" ? " data-proxy-off" : ""}>
-        <span class="bg-mode-text"><strong>${escapeHtml(opt.title)}</strong><small>${escapeHtml(opt.desc)}</small></span>
+        <div><strong>${escapeHtml(opt.title)}</strong><small>${escapeHtml(opt.desc)}</small></div>
       </label>`,
     )
     .join("");
@@ -1335,7 +1352,6 @@ async function restartNonebot() {
 }
 
 async function pollRestart() {
-  // 进程退出后接口不可达，轮询 /api/health 直到外部管理器重新拉起
   for (let attempt = 0; attempt < 60; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 2000));
     try {
@@ -1350,6 +1366,65 @@ async function pollRestart() {
     } catch (_) { /* 进程尚未拉起，继续等待 */ }
   }
   toast("重启后长时间未恢复，请手动检查进程与外部管理器", "error");
+}
+
+/* ===== Lightweight Markdown to HTML ===== */
+function renderMarkdown(md) {
+  let html = escapeHtml(md);
+  // Code blocks (```...```)
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
+    `<pre><code class="language-${lang}">${code.trim()}</code></pre>`);
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Images (before links so ![...](...) isn't consumed as a link)
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => {
+    const safeSrc = safeUrl(src) || safeImageUrl(src);
+    return safeSrc ? `<img src="${safeSrc}" alt="${alt}" loading="lazy" referrerpolicy="no-referrer">` : alt;
+  });
+  // Links
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, href) => {
+    const safeHref = safeUrl(href);
+    return safeHref ? `<a href="${safeHref}" target="_blank" rel="noreferrer">${text}</a>` : text;
+  });
+  // Headings
+  html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  // Horizontal rule
+  html = html.replace(/^---+$/gm, '<hr>');
+  // Bold + italic
+  html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  // Blockquote
+  html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+  // Unordered list items
+  html = html.replace(/^[*-] (.+)$/gm, '<li>$1</li>');
+  // Wrap consecutive <li> in <ul>
+  html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+  // Paragraphs: wrap remaining plain text blocks
+  html = html.replace(/^(?!<[hulpbo]|<\/?[hulpbo])(.+)$/gm, '<p>$1</p>');
+  // Clean up empty paragraphs and extra newlines
+  html = html.replace(/<p><\/p>/g, '');
+  html = html.replace(/\n{2,}/g, '\n');
+  return html;
+}
+
+async function loadPluginReadme(moduleName) {
+  const readmeContainer = document.getElementById("detail-readme");
+  if (!readmeContainer) return;
+  readmeContainer.innerHTML = '<div class="empty-text">正在加载 README…</div>';
+  try {
+    const data = await api(`/store/plugins/${encodeURIComponent(moduleName)}/readme`);
+    if (data.ok && data.content) {
+      readmeContainer.innerHTML = `<div class="markdown-body">${renderMarkdown(data.content)}</div>`;
+    } else {
+      readmeContainer.innerHTML = `<div class="empty-text">${escapeHtml(data.detail || "暂无 README")}</div>`;
+    }
+  } catch (_) {
+    readmeContainer.innerHTML = '<div class="empty-text">README 加载失败</div>';
+  }
 }
 
 bootstrap();

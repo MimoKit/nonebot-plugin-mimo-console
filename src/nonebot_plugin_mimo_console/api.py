@@ -251,6 +251,49 @@ def create_router(state: ConsoleState) -> APIRouter:
         logger.success(f"[Mimo Console] 已完成插件操作：{body.action} {result['project_link']}")
         return result
 
+    @router.get("/api/store/plugins/{module_name}/readme")
+    async def store_plugin_readme(
+        module_name: str,
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        """Fetch the GitHub README for a store plugin and return raw Markdown."""
+        if not state.config.mimo_console_enable_store:
+            raise HTTPException(status_code=403, detail="官方插件商店已在配置中关闭")
+        try:
+            item = await state.store.detail(module_name)
+        except StoreError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        homepage = (item or {}).get("homepage", "")
+        if not homepage:
+            return {"ok": False, "content": "", "detail": "该插件未提供主页链接"}
+        import re as _re
+        match = _re.match(
+            r"https?://github\.com/([^/]+)/([^/?#]+)", homepage
+        )
+        if not match:
+            return {"ok": False, "content": "", "detail": "主页不是 GitHub 仓库，无法获取 README"}
+        owner, repo = match.group(1), match.group(2).removesuffix(".git")
+        proxy = state.config.mimo_console_github_proxy
+        branches = ["main", "master"]
+        filenames = ["README.md", "readme.md", "README.rst", "README"]
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            for branch in branches:
+                for filename in filenames:
+                    if proxy and not is_mirror_repo(proxy):
+                        raw_url = f"{proxy}https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{filename}"
+                    else:
+                        raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{filename}"
+                    try:
+                        resp = await client.get(
+                            raw_url,
+                            headers={"User-Agent": PACKAGE_NAME},
+                        )
+                        if resp.status_code == 200:
+                            return {"ok": True, "content": resp.text, "detail": ""}
+                    except (httpx.HTTPError, OSError):
+                        continue
+        return {"ok": False, "content": "", "detail": "无法获取 README 文件"}
+
     @router.get("/api/config")
     async def get_config(
         session: Annotated[Session, Depends(require_session)],
