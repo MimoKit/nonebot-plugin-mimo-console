@@ -35,9 +35,7 @@ class PackageTests(unittest.TestCase):
         static = ROOT / "src" / "nonebot_plugin_mimo_console" / "static"
         script = (static / "assets" / "app.js").read_text(encoding="utf-8")
         styles = (static / "assets" / "styles.css").read_text(encoding="utf-8")
-        api = (ROOT / "src" / "nonebot_plugin_mimo_console" / "api.py").read_text(
-            encoding="utf-8"
-        )
+        api = (ROOT / "src" / "nonebot_plugin_mimo_console" / "api.py").read_text(encoding="utf-8")
         self.assertIn("PROXY_TEST_CONCURRENCY = 2", script)
         self.assertIn('class="radio-option proxy-option"', script)
         self.assertIn('class="proxy-latency"', script)
