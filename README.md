@@ -76,9 +76,29 @@ http://127.0.0.1:8080/mimo-console/
 | `MIMO_CONSOLE_ALLOW_PACKAGE_MANAGEMENT` | `true` | 允许安装、更新和卸载插件 |
 | `MIMO_CONSOLE_STORE_CACHE_SECONDS` | `600` | 商店数据缓存时间 |
 | `MIMO_CONSOLE_PACKAGE_TIMEOUT` | `300` | 插件操作超时时间（秒） |
+| `MIMO_CONSOLE_DEPLOYMENT_MODE` | `auto` | 安装方式：`auto` 自动识别，也可强制为 `local` 或 `docker-agent` |
+| `MIMO_CONSOLE_INSTANCE_ID` | `default` | Docker Agent 中配置的实例 ID |
+| `MIMO_CONSOLE_AGENT_SOCKET` | `/run/mimo-agent/agent.sock` | Docker Agent Unix Socket |
+| `MIMO_CONSOLE_AGENT_TOKEN_FILE` | `/run/secrets/mimo-agent-token` | 当前实例的 Agent 令牌文件 |
 | `MIMO_CONSOLE_GITHUB_PROXY` | 空 | GitHub 加速前缀或镜像仓库地址，用于 README、版本检查和自更新 |
 
 超级用户也可以发送 `mimo控制台` 或 `NoneBot控制台` 获取访问地址。
+
+## Docker 部署预览
+
+默认会自动识别普通 Python、无 Agent 的 Docker 容器和 Docker + Mimo Agent。
+普通 Python 环境会直接维护当前项目；无 Agent 的 Docker 容器也可操作，但变更
+只作用于当前容器，重建后可能丢失。Docker + Agent 模式不会在运行中的 NoneBot
+容器里安装依赖，也不会把 Docker Socket
+暴露给插件。宿主机上的受限 Agent 会更新项目锁文件、构建并验证新镜像、替换
+指定 Compose 服务，并在健康检查失败时自动回滚。WebUI 的配置编辑也由 Agent
+持久化到宿主机项目的指定 dotenv 文件，容器重建后不会丢失。
+
+第一版支持 Linux Docker Engine、Docker Compose 2.24.4+ 和带 `uv.lock` 的
+标准 NoneBot 项目。完整安装和多实例配置见
+[`agent/README.md`](https://github.com/MimoKit/nonebot-plugin-mimo-console/blob/master/agent/README.md)，
+设计与安全边界见
+[`docs/docker-deployment.md`](https://github.com/MimoKit/nonebot-plugin-mimo-console/blob/master/docs/docker-deployment.md)。
 
 ## 版本更新与重启
 
@@ -94,7 +114,7 @@ http://127.0.0.1:8080/mimo-console/
 - 管理员数据由 `nonebot-plugin-localstore` 保存，不会写进插件安装目录。
 - Token、Secret、Password、Cookie、API Key 等配置值默认脱敏。
 - 配置修改会生成备份，重启 NoneBot 后生效；修改项目配置和依赖前仍建议自行备份。
-- 自定义背景图保存在 localstore 数据目录，上传文件名随机化；远程 URL 仅允许 http/https，浏览器端加载，不做服务端可达性校验。
+- 自定义背景图保存在 localstore 数据目录，上传文件名随机化；远程 URL 会由服务端下载为本地文件，并限制为公网 80/443 地址、受支持的图片格式和 5MB 以内。
 - “禁用插件”只会阻止对应插件的 Matcher 继续响应事件，不会停止其已注册的后台任务；Mimo Console 自身不可被禁用。
 
 ## 本地开发
