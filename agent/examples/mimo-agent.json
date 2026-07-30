@@ -1,0 +1,30 @@
+{
+  "socket_path": "/run/mimo-agent/agent.sock",
+  "socket_mode": "0660",
+  "socket_gid": 1999,
+  "state_dir": "/var/lib/mimo-console-agent",
+  "docker_bin": "docker",
+  "uv_image": "local/mimo-console-uv-git:0.9.29-1",
+  "instances": {
+    "personal": {
+      "project_root": "/srv/nonebot-personal",
+      "compose_files": [
+        "docker-compose.yml"
+      ],
+      "compose_project": "nonebot-personal",
+      "service": "bot",
+      "dockerfile": "Dockerfile",
+      "build_context": ".",
+      "image_repository": "local/nonebot-personal",
+      "override_file": ".mimo/docker-compose.override.yml",
+      "environment_file": ".env.prod",
+      "health_url": "http://127.0.0.1:18080/mimo-console/api/health",
+      "token_file": "/etc/mimo-console-agent/personal.token",
+      "health_timeout": 120,
+      "build_timeout": 1800,
+      "deploy_timeout": 300,
+      "keep_images": 3,
+      "environment_backup_keep": 20
+    }
+  }
+}
