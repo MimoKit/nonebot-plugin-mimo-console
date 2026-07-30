@@ -31,7 +31,7 @@ const state = {
   background: { source: "none", url: "" },
   theme: null,
   version: null,
-  proxy: { proxy: "", presets: [] },
+  proxy: { proxy: "", presets: [], tests: {}, testing: false, testRunId: 0 },
 };
 
 const $ = (selector, context = document) => context.querySelector(selector);
@@ -1909,6 +1909,8 @@ function renderDetailPluginConfig(plugin) {
 }
 
 const PROXY_CUSTOM_VALUE = "__custom__";
+const PROXY_DIRECT_KEY = "__direct__";
+const PROXY_TEST_CONCURRENCY = 2;
 
 function presetLabel(url) {
   return url.includes("cnb.cool") ? "CNB 镜像仓库" : "GitHub 加速代理";
@@ -1916,9 +1918,46 @@ function presetLabel(url) {
 
 async function loadProxySettings() {
   try {
-    state.proxy = await api("/system/github-proxy");
+    const data = await api("/system/github-proxy");
+    state.proxy = {
+      ...state.proxy,
+      ...data,
+      tests: state.proxy.tests || {},
+      testing: false,
+    };
     renderProxySettings();
   } catch (_) { /* 读取失败不影响使用 */ }
+}
+
+function proxyTestKey(value) {
+  return value || PROXY_DIRECT_KEY;
+}
+
+function proxyTestView(value) {
+  const result = state.proxy.tests?.[proxyTestKey(value)];
+  if (!result) return { status: "untested", label: "—", detail: "尚未测试" };
+  if (result.status === "waiting") return { ...result, label: "等待中" };
+  if (result.status === "testing") return { ...result, label: "测试中…" };
+  if (result.status === "success") {
+    return { ...result, label: `${result.latency_ms} ms` };
+  }
+  if (result.status === "timeout") return { ...result, label: "超时" };
+  return { ...result, label: "失败" };
+}
+
+function proxyLatencyHtml(value) {
+  const view = proxyTestView(value);
+  return `<span class="proxy-latency" data-status="${escapeHtml(view.status)}" title="${escapeHtml(view.detail || view.label)}">${escapeHtml(view.label)}</span>`;
+}
+
+function updateProxyLatency(value) {
+  const key = proxyTestKey(value);
+  const element = $(`.proxy-latency[data-proxy-key="${CSS.escape(key)}"]`);
+  if (!element) return;
+  const view = proxyTestView(value);
+  element.dataset.status = view.status;
+  element.textContent = view.label;
+  element.title = view.detail || view.label;
 }
 
 function renderProxySettings() {
@@ -1926,6 +1965,7 @@ function renderProxySettings() {
   if (!container) return;
   const presets = state.proxy.presets || [];
   const current = state.proxy.proxy || "";
+  const mode = current === "" ? "" : presets.includes(current) ? current : PROXY_CUSTOM_VALUE;
   const options = [
     { value: "", title: "不使用 GitHub 加速", desc: "直连 GitHub" },
     ...presets.map((url) => ({ value: url, title: url, desc: presetLabel(url) })),
@@ -1933,13 +1973,24 @@ function renderProxySettings() {
   ];
   container.innerHTML = options
     .map(
-      (opt) => `<label class="radio-option">
+      (opt) => {
+        const testValue = opt.value === PROXY_CUSTOM_VALUE
+          ? (mode === PROXY_CUSTOM_VALUE ? current : "")
+          : opt.value;
+        const testKey = opt.value === PROXY_CUSTOM_VALUE && !testValue
+          ? PROXY_CUSTOM_VALUE
+          : proxyTestKey(testValue);
+        const latency = opt.value === PROXY_CUSTOM_VALUE && !testValue
+          ? '<span class="proxy-latency" data-status="untested" title="填写地址后参与测试">—</span>'
+          : proxyLatencyHtml(testValue);
+        return `<label class="radio-option proxy-option">
         <input type="radio" name="gh-proxy" value="${escapeHtml(opt.value)}"${opt.value === "" ? " data-proxy-off" : ""}>
         <div><strong>${escapeHtml(opt.title)}</strong><small>${escapeHtml(opt.desc)}</small></div>
-      </label>`,
+        ${latency.replace('class="proxy-latency"', `class="proxy-latency" data-proxy-key="${escapeHtml(testKey)}"`)}
+      </label>`;
+      },
     )
     .join("");
-  const mode = current === "" ? "" : presets.includes(current) ? current : PROXY_CUSTOM_VALUE;
   $$('input[name="gh-proxy"]', container).forEach((input) => {
     input.checked = input.value === mode;
   });
@@ -1951,6 +2002,25 @@ function renderProxySettings() {
       "hidden",
       !checked || checked.value !== PROXY_CUSTOM_VALUE,
     );
+  };
+  const customInput = $("#proxy-custom-input");
+  customInput.dataset.testKey = mode === PROXY_CUSTOM_VALUE && current
+    ? proxyTestKey(current)
+    : "";
+  customInput.oninput = () => {
+    const previousKey = customInput.dataset.testKey;
+    if (previousKey) delete state.proxy.tests[previousKey];
+    const value = customInput.value.trim();
+    const nextKey = value ? proxyTestKey(value) : PROXY_CUSTOM_VALUE;
+    customInput.dataset.testKey = value ? nextKey : "";
+    const customOption = $('input[name="gh-proxy"][value="__custom__"]', container)?.closest(".proxy-option");
+    const customLatency = $(".proxy-latency", customOption);
+    if (customLatency) {
+      customLatency.dataset.proxyKey = nextKey;
+      customLatency.dataset.status = "untested";
+      customLatency.textContent = "—";
+      customLatency.title = value ? "尚未测试" : "填写地址后参与测试";
+    }
   };
 }
 
@@ -1982,23 +2052,77 @@ async function saveProxySettings() {
 async function testProxySettings() {
   const button = $("#proxy-test-btn");
   const original = button.textContent;
+  const custom = ($("#proxy-custom-input").value || "").trim();
+  const values = ["", ...(state.proxy.presets || []), ...(custom ? [custom] : [])];
+  const targets = [...new Set(values)];
+  const runId = (state.proxy.testRunId || 0) + 1;
+  state.proxy.testRunId = runId;
+  state.proxy.testing = true;
+  state.proxy.tests = Object.fromEntries(targets.map((value) => [
+    proxyTestKey(value),
+    { status: "waiting", latency_ms: null, detail: "等待测试" },
+  ]));
+  const customOption = $('input[name="gh-proxy"][value="__custom__"]')?.closest(".proxy-option");
+  const customLatency = $(".proxy-latency", customOption);
+  if (custom && customLatency) customLatency.dataset.proxyKey = proxyTestKey(custom);
+  targets.forEach(updateProxyLatency);
   button.disabled = true;
-  button.textContent = "测试中…";
+  button.textContent = `测试中 0/${targets.length}`;
+  let completed = 0;
+  let cursor = 0;
   try {
-    const data = await api("/system/github-proxy/test", {
-      method: "POST",
-      body: JSON.stringify({ proxy: selectedProxyValue() }),
-    });
-    if (data.ok) {
-      toast(`连通正常（${data.latency_ms}ms）`);
-    } else {
-      toast(data.detail || "连接失败", "error");
+    async function worker() {
+      while (cursor < targets.length) {
+        const index = cursor;
+        cursor += 1;
+        const value = targets[index];
+        const key = proxyTestKey(value);
+        if (state.proxy.testRunId !== runId) return;
+        state.proxy.tests[key] = { status: "testing", latency_ms: null, detail: "正在测试" };
+        updateProxyLatency(value);
+        try {
+          const data = await api("/system/github-proxy/test", {
+            method: "POST",
+            body: JSON.stringify({ proxy: value }),
+          });
+          if (state.proxy.testRunId !== runId) return;
+          state.proxy.tests[key] = {
+            status: data.status || (data.ok ? "success" : "failed"),
+            latency_ms: data.latency_ms,
+            detail: data.detail || (data.ok ? "连接正常" : "连接失败"),
+          };
+        } catch (error) {
+          if (state.proxy.testRunId !== runId) return;
+          state.proxy.tests[key] = {
+            status: "failed",
+            latency_ms: null,
+            detail: error.message || "连接失败",
+          };
+        }
+        updateProxyLatency(value);
+        completed += 1;
+        button.textContent = `测试中 ${completed}/${targets.length}`;
+      }
     }
-  } catch (error) {
-    toast(error.message, "error");
+
+    await Promise.all(
+      Array.from({ length: Math.min(PROXY_TEST_CONCURRENCY, targets.length) }, () => worker()),
+    );
+    if (state.proxy.testRunId !== runId) return;
+    const results = Object.values(state.proxy.tests);
+    const success = results.filter((result) => result.status === "success").length;
+    const timeout = results.filter((result) => result.status === "timeout").length;
+    const failed = results.length - success - timeout;
+    const summary = [`${success} 个可用`];
+    if (timeout) summary.push(`${timeout} 个超时`);
+    if (failed) summary.push(`${failed} 个失败`);
+    toast(`连通性测试完成：${summary.join("，")}`, failed || timeout ? "warning" : "success");
   } finally {
-    button.disabled = false;
-    button.textContent = original;
+    if (state.proxy.testRunId === runId) {
+      state.proxy.testing = false;
+      button.disabled = false;
+      button.textContent = original;
+    }
   }
 }
 

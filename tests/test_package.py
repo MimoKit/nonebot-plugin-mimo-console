@@ -31,6 +31,22 @@ class PackageTests(unittest.TestCase):
             self.assertTrue(path.is_file(), relative)
             self.assertGreater(path.stat().st_size, 100)
 
+    def test_github_proxy_tests_render_per_source_latency(self) -> None:
+        static = ROOT / "src" / "nonebot_plugin_mimo_console" / "static"
+        script = (static / "assets" / "app.js").read_text(encoding="utf-8")
+        styles = (static / "assets" / "styles.css").read_text(encoding="utf-8")
+        api = (ROOT / "src" / "nonebot_plugin_mimo_console" / "api.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("PROXY_TEST_CONCURRENCY = 2", script)
+        self.assertIn('class="radio-option proxy-option"', script)
+        self.assertIn('class="proxy-latency"', script)
+        self.assertIn("测试中 ${completed}/${targets.length}", script)
+        self.assertIn("连通性测试完成", script)
+        self.assertIn('.proxy-latency[data-status="success"]', styles)
+        self.assertIn('.proxy-latency[data-status="timeout"]', styles)
+        self.assertIn('"status": "timeout"', api)
+
     def test_header_version_is_populated_from_runtime_metadata(self) -> None:
         static = ROOT / "src" / "nonebot_plugin_mimo_console" / "static"
         index = (static / "index.html").read_text(encoding="utf-8")

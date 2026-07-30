@@ -888,24 +888,38 @@ def create_router(state: ConsoleState) -> APIRouter:
             if not reachable:
                 return {
                     "ok": False,
+                    "status": "failed",
                     "latency_ms": None,
                     "detail": "镜像仓库无法通过 git 匿名访问",
                 }
-            return {"ok": True, "latency_ms": latency, "detail": ""}
+            return {"ok": True, "status": "success", "latency_ms": latency, "detail": ""}
         url = resolve_version_url(proxy)
         try:
             async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
                 response = await client.get(url, headers={"User-Agent": PACKAGE_NAME})
             latency = int((time.perf_counter() - started) * 1000)
+        except httpx.TimeoutException:
+            return {
+                "ok": False,
+                "status": "timeout",
+                "latency_ms": None,
+                "detail": "连接超时（10 秒）",
+            }
         except (httpx.HTTPError, OSError) as exc:
-            return {"ok": False, "latency_ms": None, "detail": f"连接失败：{exc}"}
+            return {
+                "ok": False,
+                "status": "failed",
+                "latency_ms": None,
+                "detail": f"连接失败：{exc}",
+            }
         if response.status_code != 200:
             return {
                 "ok": False,
+                "status": "failed",
                 "latency_ms": latency,
                 "detail": f"加速地址返回 HTTP {response.status_code}",
             }
-        return {"ok": True, "latency_ms": latency, "detail": ""}
+        return {"ok": True, "status": "success", "latency_ms": latency, "detail": ""}
 
     @router.post("/api/system/update")
     async def system_update(
