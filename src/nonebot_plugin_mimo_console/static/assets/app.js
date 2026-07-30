@@ -15,7 +15,10 @@ const state = {
   storePages: 1,
   storeTotal: 0,
   packageManagement: true,
+  deployment: { mode: "python", rollback: false, github_install: false },
   storeSearchTimer: null,
+  dependencies: [],
+  dependencyMeta: { total: 0, direct: 0, path: "" },
   configItems: [],
   configOriginal: new Map(),
   configChanges: new Map(),
@@ -40,13 +43,20 @@ function escapeHtml(value) {
   })[char]);
 }
 
-function safeUrl(value) {
+function normalizeWebUrl(value, baseUrl = "") {
   try {
-    const url = new URL(String(value || ""));
-    return ["http:", "https:"].includes(url.protocol) ? escapeHtml(url.href) : "";
+    const url = baseUrl
+      ? new URL(String(value || ""), baseUrl)
+      : new URL(String(value || ""));
+    return ["http:", "https:"].includes(url.protocol) ? url.href : "";
   } catch (_) {
     return "";
   }
+}
+
+function safeUrl(value) {
+  const url = normalizeWebUrl(value);
+  return url ? escapeHtml(url) : "";
 }
 
 function safeImageUrl(value) {
@@ -162,6 +172,9 @@ function bindEvents() {
   $("#official-only").addEventListener("change", () => { state.storePage = 1; loadStorePlugins(); });
   $("#store-prev").addEventListener("click", () => changeStorePage(-1));
   $("#store-next").addEventListener("click", () => changeStorePage(1));
+  $("#dependency-search").addEventListener("input", renderDependencies);
+  $("#dependency-filter").addEventListener("change", renderDependencies);
+  $("#dependency-install-form").addEventListener("submit", installDependency);
   $("#config-search").addEventListener("input", renderConfig);
   $("#log-search").addEventListener("input", renderLogs);
   $("#log-level").addEventListener("change", renderLogs);
@@ -171,11 +184,18 @@ function bindEvents() {
   });
   $("#clear-logs").addEventListener("click", clearLogs);
   $$("input[name='bg-mode']").forEach((radio) =>
-    radio.addEventListener("change", () => switchBgMode(radio.value)),
+    radio.addEventListener("change", () => {
+      if (radio.checked) selectBackgroundMode(radio.value);
+    }),
   );
-  $("#bg-url-save").addEventListener("click", saveBgUrl);
+  $("#bg-url-input").addEventListener("input", (event) => queueBgUrlSave(event.target));
+  $("#bg-url-input").addEventListener("change", (event) => queueBgUrlSave(event.target, true));
+  $("#bg-url-input").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    queueBgUrlSave(event.target, true);
+  });
   $("#bg-file-input").addEventListener("change", (event) => uploadBgFile(event.target));
-  $("#bg-reset").addEventListener("click", resetBg);
   $("#bg-file-label").addEventListener("click", () => $("#bg-file-input").click());
   $("#bg-blur-input").addEventListener("input", updateVisualSettings);
   $("#card-opacity-input").addEventListener("input", updateVisualSettings);
@@ -188,6 +208,17 @@ function bindEvents() {
   $("#accent-custom-input").addEventListener("input", (event) => changeTheme({ accent: event.target.value }));
   $("#theme-reset").addEventListener("click", resetTheme);
   $("#restart-button").addEventListener("click", restartNonebot);
+  $("#deployment-refresh").addEventListener("click", loadDeploymentOperations);
+  $("#github-install-button").addEventListener("click", () => showGithubModal(true));
+  $("#github-modal-close").addEventListener("click", () => showGithubModal(false));
+  $("#github-modal-cancel").addEventListener("click", () => showGithubModal(false));
+  $("#github-modal").addEventListener("click", (event) => {
+    if (event.target.id === "github-modal") showGithubModal(false);
+  });
+  $("#github-install-form").addEventListener("submit", installGithubPlugin);
+  $("#github-repository-url").addEventListener("input", updateGithubInstallPreview);
+  $("#github-project-name").addEventListener("input", updateGithubInstallPreview);
+  $("#github-module-name").addEventListener("input", updateGithubInstallPreview);
   $("#check-update-btn").addEventListener("click", checkUpdate);
   $("#proxy-save").addEventListener("click", saveProxySettings);
   $("#proxy-test-btn").addEventListener("click", testProxySettings);
@@ -197,6 +228,10 @@ function bindEvents() {
     $("#plugin-grid").classList.toggle("list", button.dataset.view === "list");
   }));
   $("#save-config").addEventListener("click", saveConfig);
+  $("#restore-config").addEventListener("click", restoreConfigBackup);
+  $("#config-backup-select").addEventListener("change", (event) => {
+    $("#restore-config").disabled = !event.target.value;
+  });
   $("#discard-config").addEventListener("click", discardConfig);
   $("#add-config").addEventListener("click", () => showModal(true));
   $("#modal-close").addEventListener("click", () => showModal(false));
@@ -208,6 +243,7 @@ function bindEvents() {
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       if (!$("#detail-drawer").classList.contains("hidden")) closeDetail();
+      else if (!$("#github-modal").classList.contains("hidden")) showGithubModal(false);
       else if (!$("#modal").classList.contains("hidden")) showModal(false);
     }
   });
@@ -247,7 +283,15 @@ function enterApp(username) {
   clearTimers();
   state.timers.push(setInterval(() => loadDashboard(false), 5000));
   state.timers.push(setInterval(loadLogs, 2000));
-  Promise.allSettled([loadDashboard(), loadPlugins(), loadLogs(), loadBackground(), loadVersion(), loadProxySettings()]);
+  Promise.allSettled([
+    loadDashboard(),
+    loadPlugins(),
+    loadLogs(),
+    loadBackground(),
+    loadVersion(),
+    loadProxySettings(),
+    loadDeployment(),
+  ]);
 }
 
 async function signOut(requestLogout) {
@@ -270,7 +314,14 @@ function clearTimers() {
   state.timers = [];
 }
 
-const pages = { dashboard: "概览", plugins: "插件", config: "配置", logs: "日志", appearance: "外观" };
+const pages = {
+  dashboard: "概览",
+  plugins: "插件",
+  dependencies: "依赖管理",
+  config: "核心配置",
+  logs: "日志",
+  appearance: "外观",
+};
 async function navigate(page) {
   if (!pages[page]) return;
   state.page = page;
@@ -279,6 +330,7 @@ async function navigate(page) {
   $("#page-crumb").textContent = pages[page];
   toggleSidebar(false);
   if (page === "plugins") await refreshPluginsPage();
+  if (page === "dependencies") await loadDependencies();
   if (page === "config") await loadConfig();
   if (page === "logs") { await loadLogs(); scrollLogs(); }
   if (page === "appearance") refreshAppearance();
@@ -308,6 +360,7 @@ async function refreshCurrent() {
   try {
     if (state.page === "dashboard") await loadDashboard();
     if (state.page === "plugins") await refreshPluginsPage();
+    if (state.page === "dependencies") await loadDependencies();
     if (state.page === "config") await loadConfig();
     if (state.page === "logs") await loadLogs();
     toast("已刷新");
@@ -346,11 +399,6 @@ function setRing(id, value) {
   $(id).style.setProperty("--value", safe.toFixed(1));
 }
 
-function setBar(id, value) {
-  const safe = Math.max(0, Math.min(100, Number(value || 0)));
-  $(id).style.width = `${safe}%`;
-}
-
 async function loadDashboard(showErrors = true) {
   try {
     const data = await api("/dashboard");
@@ -359,18 +407,6 @@ async function loadDashboard(showErrors = true) {
     const cpu = Number(system.cpu_percent || 0).toFixed(1);
     const memory = Number(system.memory_percent || 0).toFixed(1);
     const disk = Number(system.disk_percent || 0).toFixed(1);
-    $("#cpu-value").textContent = `${cpu}%`;
-    $("#cpu-sub").textContent = `${system.cpu_count} 个逻辑核心`;
-    $("#memory-value").textContent = `${memory}%`;
-    $("#memory-sub").textContent = `${formatBytes(system.memory_used)} / ${formatBytes(system.memory_total)}`;
-    $("#disk-value").textContent = `${disk}%`;
-    $("#disk-sub").textContent = `${formatBytes(system.disk_used)} / ${formatBytes(system.disk_total)}`;
-    $("#bot-value").textContent = data.counts.bots;
-    $("#bot-sub").textContent = `${new Set(data.bots.map((bot) => bot.adapter)).size} 个适配器`;
-    setBar("#cpu-bar", cpu);
-    setBar("#memory-bar", memory);
-    setBar("#disk-bar", disk);
-    setBar("#bot-bar", Math.min(100, data.counts.bots * 20));
     $("#cpu-ring-value").textContent = `${cpu}%`;
     $("#memory-ring-value").textContent = `${memory}%`;
     $("#disk-ring-value").textContent = `${disk}%`;
@@ -388,7 +424,6 @@ async function loadDashboard(showErrors = true) {
     $("#platform-value").textContent = system.platform;
     $("#plugin-count").textContent = data.counts.plugins;
     $("#matcher-count").textContent = data.counts.matchers;
-    $("#nav-plugin-count").textContent = data.counts.plugins;
     $("#sidebar-uptime").textContent = `已运行 ${formatUptime(system.uptime)}`;
     $("#bot-list").innerHTML = data.bots.length
       ? data.bots.map((bot) => `<div class="bot-chip"><strong>${escapeHtml(bot.id)}</strong><span>${escapeHtml(bot.adapter)}</span></div>`).join("")
@@ -402,6 +437,7 @@ async function loadPlugins() {
   try {
     const data = await api("/plugins");
     state.plugins = data.items || [];
+    state.packageManagement = data.package_management !== false;
     $("#plugin-total").textContent = state.plugins.length;
     $("#nav-plugin-count").textContent = state.plugins.length;
     $("#loaded-tab-count").textContent = state.plugins.length;
@@ -417,8 +453,8 @@ function renderPlugins() {
     [item.title, item.name, item.module, item.description].join(" ").toLowerCase().includes(query),
   );
   $("#plugin-result-meta").textContent = query
-    ? `找到 ${items.length} 个已加载插件`
-    : `当前进程已加载 ${items.length} 个插件 · 点击卡片查看详情`;
+    ? `找到 ${items.length} 个已安装插件`
+    : `当前项目已安装 ${items.length} 个插件 · 点击卡片查看详情`;
   $("#plugin-grid").innerHTML = items.length
     ? items.map((item, index) => loadedPluginHtml(item, index)).join("")
     : '<div class="empty-state">没有找到匹配的插件</div>';
@@ -427,22 +463,29 @@ function renderPlugins() {
 }
 
 function loadedPluginHtml(item, index) {
-  const statusBadge = item.disabled
-    ? '<span class="badge disabled">已禁用</span>'
-    : '<span class="badge loaded">运行中</span>';
-  return `<article class="plugin-card" data-detail-source="loaded" data-detail-index="${index}" tabindex="0" role="button">
+  const isSelf = item.module === "nonebot_plugin_mimo_console";
+  const isUnloaded = item.loaded === false;
+  const statusButton = `<button
+    class="plugin-state-button ${isUnloaded ? "unloaded" : item.disabled ? "disabled" : "enabled"}"
+    type="button"
+    data-plugin-toggle="${escapeHtml(item.name)}"
+    aria-pressed="${String(!item.disabled && !isUnloaded)}"
+    aria-label="${isUnloaded ? "未加载" : item.disabled ? "启用" : "禁用"} ${escapeHtml(item.title || item.name)}"
+    ${isSelf || isUnloaded ? `disabled title="${isSelf ? "控制台自身不能禁用" : "插件当前未加载，请先检查启动日志"}"` : ""}
+  >${isUnloaded ? "未加载" : item.disabled ? "已禁用" : "运行中"}</button>`;
+  return `<article class="plugin-card" data-detail-source="loaded" data-detail-index="${index}" data-plugin-name="${escapeHtml(item.name)}" tabindex="0" role="button">
     <div class="plugin-card-head">
       ${pluginAvatarHtml(item)}
       <div class="plugin-title">
         <h3>${escapeHtml(item.title)}</h3>
         <div class="module">${escapeHtml(item.module)}</div>
       </div>
-      ${statusBadge}
+      ${statusButton}
     </div>
     <p class="desc">${escapeHtml(item.description)}</p>
     <div class="plugin-meta">
       <span>${escapeHtml(item.type)}</span>
-      <span>${item.matchers} 个响应器</span>
+      <span>${isUnloaded ? "等待修复加载错误" : `${escapeHtml(item.matchers ?? 0)} 个响应器`}</span>
       <span class="detail-hint">详情 →</span>
     </div>
   </article>`;
@@ -469,7 +512,7 @@ async function switchPluginTab(tabName) {
     button.setAttribute("aria-selected", String(active));
   });
   $("#plugin-search").value = "";
-  $("#plugin-search").placeholder = tabName === "store" ? "搜索插件、作者、标签或包名" : "搜索已加载插件";
+  $("#plugin-search").placeholder = tabName === "store" ? "搜索插件、作者、标签或包名" : "搜索已安装插件";
   $("#official-filter").classList.toggle("hidden", tabName !== "store");
   $("#store-pagination").classList.toggle("hidden", tabName !== "store");
   if (tabName === "store") await loadStorePlugins();
@@ -566,7 +609,9 @@ function bindPluginCardEvents() {
     const open = () => {
       const source = card.dataset.detailSource;
       const index = Number(card.dataset.detailIndex);
-      if (source === "loaded") openLoadedDetail(state.plugins[index]);
+      if (source === "loaded") {
+        openLoadedDetail(state.plugins.find((item) => item.name === card.dataset.pluginName));
+      }
       else openStoreDetail(state.storePlugins[index]);
     };
     card.addEventListener("click", (event) => {
@@ -580,18 +625,27 @@ function bindPluginCardEvents() {
       }
     });
   });
+  $$("[data-plugin-toggle]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const item = state.plugins.find((plugin) => plugin.name === button.dataset.pluginToggle);
+      if (item) await togglePluginDisabled(item, button);
+    });
+  });
 }
 
-function openLoadedDetail(item) {
+async function openLoadedDetail(item) {
   if (!item) return;
   state.detailSource = "loaded";
   state.detailPlugin = item;
   setDetailAvatar(item);
   $("#detail-title").textContent = item.title || item.name;
   $("#detail-module").textContent = item.module || "";
-  $("#detail-badges").innerHTML = item.disabled
-    ? '<span class="badge disabled">已禁用</span>'
-    : '<span class="badge loaded">运行中</span>';
+  $("#detail-badges").innerHTML = item.loaded === false
+    ? '<span class="badge disabled">未加载</span>'
+    : item.disabled
+      ? '<span class="badge disabled">已禁用</span>'
+      : '<span class="badge loaded">运行中</span>';
   const homepage = safeUrl(item.homepage);
   $("#detail-body").innerHTML = `
     <div class="detail-section">
@@ -610,28 +664,72 @@ function openLoadedDetail(item) {
     </div>
     ${item.path ? `<div class="detail-section"><h3>路径</h3><p class="detail-desc mono">${escapeHtml(item.path)}</p></div>` : ""}
     ${homepage ? `<div class="detail-section"><h3>链接</h3><div class="detail-links"><a href="${homepage}" target="_blank" rel="noreferrer"><span>主页 / 文档</span><span>↗</span></a></div></div>` : ""}
+    <div class="detail-section">
+      <h3>README</h3>
+      <div id="detail-readme"><div class="empty-text">正在加载 README…</div></div>
+    </div>
+    <div class="detail-section plugin-config-section" id="detail-plugin-config">
+      <h3>插件配置</h3>
+      <div class="empty-state compact">${item.loaded === false ? "插件未加载，暂无运行时配置可编辑" : "正在读取配置…"}</div>
+    </div>
   `;
-  const isSelf = item.module === "nonebot_plugin_mimo_console";
-  const toggleButton = isSelf
-    ? ""
-    : `<button class="btn ${item.disabled ? "btn-ghost" : "btn-danger"}" id="detail-toggle-disabled" type="button">${item.disabled ? "启用插件" : "禁用插件"}</button>`;
   $("#detail-actions").innerHTML = [
-    homepage ? `<a class="btn btn-primary" href="${homepage}" target="_blank" rel="noreferrer">打开主页</a>` : "",
-    toggleButton,
+    state.packageManagement
+      && item.source_repository
+      && item.module !== "nonebot_plugin_mimo_console"
+      ? `<button class="btn btn-primary" type="button" data-source-plugin-action="update">更新源码插件</button>
+         <button class="btn btn-danger" type="button" data-source-plugin-action="uninstall">卸载源码插件</button>`
+      : "",
+    homepage ? `<a class="btn btn-ghost" href="${homepage}" target="_blank" rel="noreferrer">打开主页</a>` : "",
   ].join("");
-  const toggle = $("#detail-toggle-disabled");
-  if (toggle) toggle.addEventListener("click", () => togglePluginDisabled(item));
+  $$("[data-source-plugin-action]", $("#detail-actions")).forEach((button) => {
+    button.addEventListener("click", () => manageLoadedSourcePlugin(item, button));
+  });
   showDetail(true);
+  loadPluginReadme(item.name || item.module, "loaded");
+  if (item.loaded !== false) {
+    try {
+      await fetchConfigData({ preserveChanges: true });
+      if (state.detailPlugin === item) renderDetailPluginConfig(item);
+    } catch (error) {
+      const target = $("#detail-plugin-config");
+      if (target) target.innerHTML = `<h3>插件配置</h3><div class="empty-state compact">${escapeHtml(error.message)}</div>`;
+    }
+  }
 }
 
-async function togglePluginDisabled(item) {
+async function manageLoadedSourcePlugin(item, button) {
+  const action = button.dataset.sourcePluginAction;
+  const label = action === "update" ? "更新" : "卸载";
+  if (!window.confirm(`确定${label}「${item.title || item.name}」吗？`)) return;
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = `${label}中…`;
+  try {
+    let result = await api(`/plugins/${encodeURIComponent(item.module)}/action`, {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    });
+    if (result.status && !["succeeded", "failed", "rolled_back"].includes(result.status)) {
+      result = await waitPackageOperation(result, button, label);
+    }
+    if (result.status === "failed" || result.status === "rolled_back") {
+      throw new Error(result.error || `${label}失败`);
+    }
+    toast(`${item.title || item.name} 已${label}`, "success");
+    closeDetail();
+    await loadPlugins();
+  } catch (error) {
+    toast(error.message, "error");
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+async function togglePluginDisabled(item, button = null) {
+  if (item.loaded === false) return;
   const next = !item.disabled;
-  if (
-    next
-    && !window.confirm(
-      `确定禁用插件「${item.title || item.name}」？\n禁用后它的响应器不再处理消息（插件后台任务不受影响），可随时重新启用。`,
-    )
-  ) return;
+  if (button) button.disabled = true;
   try {
     await api("/plugins/disabled", {
       method: "PUT",
@@ -639,10 +737,14 @@ async function togglePluginDisabled(item) {
     });
     item.disabled = next;
     renderPlugins();
-    openLoadedDetail(item);
-    toast(next ? `已禁用 ${item.title || item.name}` : `已启用 ${item.title || item.name}`);
+    if (state.detailPlugin === item && state.detailSource === "loaded") {
+      $("#detail-badges").innerHTML = item.disabled
+        ? '<span class="badge disabled">已禁用</span>'
+        : '<span class="badge loaded">运行中</span>';
+    }
   } catch (error) {
     toast(error.message, "error");
+    if (button) button.disabled = false;
   }
 }
 
@@ -680,10 +782,14 @@ function renderStoreDetail(item) {
   const adapters = item.supported_adapters || [];
   const tagHtml = tags.length
     ? tags.map((tag, i) => {
-        const color = Array.isArray(item.tags) && item.tags[i] && item.tags[i].color
+        const raw = Array.isArray(item.tags) && item.tags[i] && item.tags[i].color
           ? item.tags[i].color
           : "";
-        const style = color ? `style="--tag-c:${escapeHtml(color)};background:color-mix(in srgb, ${escapeHtml(color)} 18%, transparent);color:${escapeHtml(color)}"` : "";
+        // Only accept a strict #hex color; escapeHtml does not neutralize `;`, `:`
+        // or `(`, so an unvalidated store-supplied value could inject extra CSS
+        // declarations (e.g. background-image:url(...) beacons).
+        const color = /^#[0-9a-fA-F]{3,8}$/.test(raw) ? raw : "";
+        const style = color ? `style="--tag-c:${color};background:color-mix(in srgb, ${color} 18%, transparent);color:${color}"` : "";
         return `<span class="detail-tag" ${style}>${escapeHtml(tag)}</span>`;
       }).join("")
     : '<span class="store-tag muted">暂无标签</span>';
@@ -777,18 +883,34 @@ async function manageStorePlugin(button) {
   const moduleName = button.dataset.pluginModule;
   const pluginName = button.dataset.pluginName;
   const labels = { install: "安装", update: "更新", uninstall: "卸载" };
-  if (!window.confirm(`确定${labels[action]}「${pluginName}」吗？完成后需要重启 NoneBot。`)) return;
+  const dockerMode = state.deployment.mode === "docker-agent";
+  const containerLocal = state.deployment.mode === "docker-local";
+  const effect = dockerMode
+    ? "系统会构建新镜像、验证并自动替换当前容器；失败时自动回滚。"
+    : containerLocal
+      ? "操作会立即修改当前容器；容器重建后可能丢失，建议连接 Mimo Agent 后再做长期变更。"
+      : "完成后需要重启 NoneBot。";
+  if (!window.confirm(`确定${labels[action]}「${pluginName}」吗？${effect}`)) return;
   const original = button.textContent;
   button.disabled = true;
   button.textContent = `${labels[action]}中…`;
   const drawer = $("#detail-drawer");
   drawer.classList.add("busy");
   try {
-    await api(`/store/plugins/${encodeURIComponent(moduleName)}/action`, {
+    let result = await api(`/store/plugins/${encodeURIComponent(moduleName)}/action`, {
       method: "POST",
       body: JSON.stringify({ action }),
     });
-    toast(`${pluginName} 已${labels[action]}，重启 NoneBot 后生效`, "warning");
+    if (result.status && !["succeeded", "failed", "rolled_back"].includes(result.status)) {
+      result = await waitPackageOperation(result, button, labels[action]);
+    }
+    if (result.status === "rolled_back" || result.status === "failed") {
+      throw new Error(result.error || `${labels[action]}失败，原容器已恢复`);
+    }
+    const message = result.restart_required
+      ? `${pluginName} 已${labels[action]}，重启 NoneBot 后生效`
+      : `${pluginName} 已${labels[action]}并完成容器切换`;
+    toast(message, result.restart_required ? "warning" : "success");
     await loadStorePlugins();
     if (state.detailSource === "store" && state.detailPlugin?.module_name === moduleName) {
       const next = state.storePlugins.find((item) => item.module_name === moduleName);
@@ -804,12 +926,343 @@ async function manageStorePlugin(button) {
   }
 }
 
+async function loadDeployment() {
+  try {
+    state.deployment = await api("/store/deployment");
+    state.packageManagement = Boolean(state.deployment.package_management);
+    const dockerMode = state.deployment.mode === "docker-agent";
+    const containerLocal = state.deployment.mode === "docker-local";
+    const githubButton = $("#github-install-button");
+    githubButton.classList.toggle("hidden", !state.packageManagement);
+    githubButton.disabled = !state.deployment.github_install;
+    githubButton.title = state.deployment.github_install
+      ? dockerMode
+        ? "从公开 GitHub 仓库安装插件并自动构建镜像"
+        : "从公开 GitHub 仓库安装插件"
+      : "当前运行环境缺少 Git，无法从 GitHub 安装";
+    $("#restart-button").title = dockerMode
+      ? "由 Mimo Agent 重建并检查当前 NoneBot 容器"
+      : containerLocal
+        ? "重启当前容器内的 NoneBot 进程"
+        : "重启 NoneBot 进程";
+    $("#deployment-panel").classList.toggle("hidden", !dockerMode);
+    if (dockerMode) {
+      $("#deployment-summary").textContent = state.deployment.available
+        ? `实例 ${state.deployment.instance_id} · 宿主机 Agent 已连接 · 支持自动回滚`
+        : `实例 ${state.deployment.instance_id} · 宿主机 Agent 未连接 · ${state.deployment.error || "请检查 Agent 服务与 Socket 挂载"}`;
+      if (state.deployment.available) {
+        await loadDeploymentOperations();
+        state.timers.push(setInterval(loadDeploymentOperations, 5000));
+      } else {
+        $("#deployment-operations").innerHTML = '<div class="empty-state">Agent 恢复连接后将在这里显示部署记录</div>';
+      }
+    }
+  } catch (_) {
+    state.deployment = { mode: "python", rollback: false, github_install: false };
+    $("#github-install-button").classList.add("hidden");
+    $("#deployment-panel").classList.add("hidden");
+  }
+}
+
+function showGithubModal(show) {
+  $("#github-modal").classList.toggle("hidden", !show);
+  $("#github-modal-error").textContent = "";
+  if (show) {
+    updateGithubInstallPreview();
+    setTimeout(() => $("#github-repository-url").focus(), 0);
+  } else {
+    $("#github-install-form").reset();
+    $("#github-install-hint").textContent = "";
+  }
+}
+
+function updateGithubInstallPreview() {
+  const value = $("#github-repository-url").value.trim();
+  let repository = "";
+  try {
+    const url = new URL(value);
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (url.protocol === "https:" && ["github.com", "www.github.com"].includes(url.hostname) && parts.length === 2) {
+      repository = parts[1].replace(/\.git$/i, "");
+    }
+  } catch (_) { /* wait for a complete URL */ }
+  if (!repository) {
+    $("#github-install-hint").textContent = "";
+    return;
+  }
+  const projectName = $("#github-project-name").value.trim() || repository;
+  const moduleName = $("#github-module-name").value.trim() || repository.replace(/[-.]+/g, "_");
+  $("#github-install-hint").textContent = `包名 ${projectName} · 导入名 ${moduleName}`;
+}
+
+async function installGithubPlugin(event) {
+  event.preventDefault();
+  const button = $("#github-modal-confirm");
+  const errorBox = $("#github-modal-error");
+  const repositoryUrl = $("#github-repository-url").value.trim();
+  const body = {
+    repository_url: repositoryUrl,
+    project_name: $("#github-project-name").value.trim(),
+    module_name: $("#github-module-name").value.trim(),
+  };
+  errorBox.textContent = "";
+  button.disabled = true;
+  button.textContent = "提交中…";
+  try {
+    let result = await api("/store/github/install", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    if (result.status && !["succeeded", "failed", "rolled_back"].includes(result.status)) {
+      result = await waitPackageOperation(result, button, "安装");
+    }
+    if (result.status === "rolled_back" || result.status === "failed") {
+      throw new Error(result.error || "安装失败，原容器已恢复");
+    }
+    showGithubModal(false);
+    const message = result.restart_required
+      ? `${result.project_link} 已从 GitHub 安装，重启 NoneBot 后生效`
+      : `${result.project_link} 已从 GitHub 安装并完成容器切换`;
+    toast(message, result.restart_required ? "warning" : "success");
+    await Promise.all([loadPlugins(), loadDeploymentOperations()]);
+  } catch (error) {
+    errorBox.textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = "安装并部署";
+  }
+}
+
+async function loadDeploymentOperations() {
+  if (state.deployment.mode !== "docker-agent") return;
+  const container = $("#deployment-operations");
+  try {
+    const data = await api("/store/operations");
+    const items = (data.items || []).slice(0, 8);
+    container.innerHTML = items.length
+      ? items.map((operation) => {
+        const title = operation.action === "restart"
+          ? "重启 NoneBot"
+          : `${({ install: "安装", update: "更新", uninstall: "卸载" })[operation.action] || operation.action} ${operation.project_name}`;
+        const canRollback = state.deployment.rollback
+          && operation.rollback_available === true;
+        return `<div class="deployment-operation">
+          <div><strong>${escapeHtml(title)}</strong><small>${escapeHtml(operation.operation_id)}</small></div>
+          <span class="operation-status ${escapeHtml(operation.status)}">${escapeHtml(operationLabels[operation.status] || operation.status)}</span>
+          ${canRollback ? `<button class="btn btn-ghost btn-sm" type="button" data-rollback-operation="${escapeHtml(operation.operation_id)}">回滚</button>` : ""}
+        </div>`;
+      }).join("")
+      : '<div class="empty-state compact">还没有 Docker 部署记录</div>';
+    $$("[data-rollback-operation]", container).forEach((button) => {
+      button.addEventListener("click", () => rollbackDeployment(button));
+    });
+  } catch (error) {
+    container.innerHTML = `<div class="empty-state compact">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function rollbackDeployment(button) {
+  if (!window.confirm("确定回滚到这次操作之前的项目清单和容器镜像吗？")) return;
+  button.disabled = true;
+  try {
+    let operation = await api(
+      `/store/operations/${encodeURIComponent(button.dataset.rollbackOperation)}/rollback`,
+      { method: "POST" },
+    );
+    operation = await waitPackageOperation(operation, button, "回滚");
+    if (operation.status !== "rolled_back") {
+      throw new Error(operation.error || "回滚失败");
+    }
+    toast("已恢复旧项目清单和容器镜像");
+    await loadDeploymentOperations();
+    await loadStorePlugins();
+  } catch (error) {
+    toast(error.message, "error");
+    button.disabled = false;
+  }
+}
+
+const operationLabels = {
+  queued: "排队",
+  preparing: "准备项目",
+  locking: "解析依赖",
+  building: "构建镜像",
+  verifying: "验证镜像",
+  deploying: "切换容器",
+  health_checking: "健康检查",
+  rolling_back: "正在回滚",
+  succeeded: "成功",
+  rolled_back: "已回滚",
+  failed: "失败",
+};
+
+async function waitPackageOperation(initial, button = null, actionLabel = "操作") {
+  let operation = initial;
+  // The Agent applies its timeout independently to dependency resolution, lock
+  // verification and image build, so the complete transaction has no safe fixed
+  // browser-side ceiling. Poll until the persisted operation reaches a terminal
+  // state. A continuous one-hour outage is longer than the maximum deploy plus
+  // health-check window and indicates that the Agent/WebUI really is unavailable.
+  const POLL_INTERVAL_MS = 2000;
+  const MAX_CONSECUTIVE_FAILURES = 1800; // ~1h of unreachable Agent/WebUI
+  let consecutiveFailures = 0;
+  while (true) {
+    if (["succeeded", "failed", "rolled_back"].includes(operation.status)) return operation;
+    if (button) button.textContent = operationLabels[operation.status] || `${actionLabel}中…`;
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    try {
+      operation = await api(`/store/operations/${encodeURIComponent(operation.operation_id)}`);
+      consecutiveFailures = 0;
+    } catch (_) {
+      // 部署阶段容器会短暂离线；保留操作 ID，待 WebUI 恢复后继续查询。
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        throw new Error("无法连接 Mimo Agent，请检查 Agent 服务与网络后重试");
+      }
+    }
+  }
+}
+
 function changeStorePage(offset) {
   const next = Math.min(state.storePages, Math.max(1, state.storePage + offset));
   if (next === state.storePage) return;
   state.storePage = next;
   loadStorePlugins();
   window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function loadDependencies() {
+  const list = $("#dependency-list");
+  list.innerHTML = '<div class="store-loading"><i></i><span>正在读取依赖…</span></div>';
+  try {
+    const data = await api("/dependencies");
+    state.dependencies = data.items || [];
+    state.dependencyMeta = {
+      total: Number(data.total || 0),
+      direct: Number(data.direct || 0),
+      path: data.path || "",
+    };
+    if (data.deployment) state.deployment = { ...state.deployment, ...data.deployment };
+    state.packageManagement = data.package_management !== false;
+    renderDependencyModeNotice();
+    $("#dependency-direct-count").textContent = state.dependencyMeta.direct;
+    $("#dependency-name").disabled = !state.packageManagement;
+    $("#dependency-install-button").disabled = !state.packageManagement;
+    renderDependencies();
+  } catch (error) {
+    list.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    toast(error.message, "error");
+  }
+}
+
+function renderDependencyModeNotice() {
+  const mode = state.deployment.mode;
+  const automatic = state.deployment.auto_detected !== false;
+  const prefix = automatic ? "已自动识别" : "已按配置使用";
+  const messages = {
+    "docker-agent": `${prefix}：官方 Docker + Mimo Agent。变更会写入项目、重建镜像并执行健康检查。`,
+    "docker-local": `${prefix}：Docker 容器（未连接 Agent）。操作仅修改当前容器，重建后可能丢失。`,
+    python: `${prefix}：普通 Python/虚拟环境部署。变更会写入当前项目，重启 NoneBot 后生效。`,
+  };
+  $("#dependency-mode-notice").textContent = `${messages[mode] || messages.python} 间接依赖仅供查看。`;
+}
+
+function dependencyKindLabel(item) {
+  if (item.kind === "plugin") return "NoneBot 插件";
+  if (item.kind === "core") return "核心组件";
+  return item.direct ? "项目依赖" : "间接依赖";
+}
+
+function renderDependencies() {
+  const query = $("#dependency-search").value.trim().toLowerCase();
+  const filter = $("#dependency-filter").value;
+  const items = state.dependencies.filter((item) => {
+    if (filter === "direct" && !item.direct) return false;
+    if (filter === "transitive" && item.direct) return false;
+    return [item.name, item.version, item.requirement].join(" ").toLowerCase().includes(query);
+  });
+  $("#dependency-result-meta").textContent = `${items.length} 个结果 · 共安装 ${state.dependencyMeta.total} 个 Python 包`;
+  $("#dependency-list").innerHTML = items.length
+    ? items.map(dependencyItemHtml).join("")
+    : '<div class="empty-state">没有找到匹配的依赖</div>';
+  $$("[data-dependency-action]").forEach((button) => {
+    button.addEventListener("click", () => manageDependency(
+      button.dataset.dependencyAction,
+      button.dataset.dependencyName,
+      button,
+    ));
+  });
+}
+
+function dependencyItemHtml(item) {
+  let actions = '<span class="dependency-readonly">由其他依赖自动管理</span>';
+  if (item.kind === "plugin") {
+    actions = '<span class="dependency-readonly">请在插件中心管理</span>';
+  } else if (item.kind === "core") {
+    actions = '<span class="dependency-readonly">运行所必需</span>';
+  } else if (item.manageable && state.packageManagement) {
+    actions = `
+      <button class="btn btn-secondary btn-sm" type="button" data-dependency-action="update" data-dependency-name="${escapeHtml(item.name)}">更新</button>
+      <button class="btn btn-danger btn-sm" type="button" data-dependency-action="uninstall" data-dependency-name="${escapeHtml(item.name)}">卸载</button>
+    `;
+  } else if (item.direct) {
+    actions = '<span class="dependency-readonly">依赖管理已关闭</span>';
+  }
+  return `<article class="card dependency-item">
+    <div class="dependency-main">
+      <div class="dependency-icon">${escapeHtml(item.name.slice(0, 1).toUpperCase())}</div>
+      <div class="min-w-0">
+        <h3>${escapeHtml(item.name)}</h3>
+        <p class="mono">${escapeHtml(item.requirement || "由项目依赖解析安装")}</p>
+      </div>
+    </div>
+    <div class="dependency-version"><span>已安装</span><strong>${escapeHtml(item.version || "未安装")}</strong></div>
+    <span class="badge">${dependencyKindLabel(item)}</span>
+    <div class="dependency-actions">${actions}</div>
+  </article>`;
+}
+
+async function installDependency(event) {
+  event.preventDefault();
+  const name = $("#dependency-name").value.trim();
+  if (!name) return;
+  await manageDependency("install", name, $("#dependency-install-button"));
+  $("#dependency-name").value = "";
+}
+
+async function manageDependency(action, name, button) {
+  const mode = state.deployment.mode;
+  const effect = mode === "docker-agent"
+    ? "系统会重建镜像并自动切换容器。"
+    : mode === "docker-local"
+      ? "该变更仅作用于当前容器，容器重建后可能丢失。"
+      : "完成后需要重启 NoneBot。";
+  if (
+    action === "uninstall"
+    && !window.confirm(`确定卸载项目依赖「${name}」？${effect}`)
+  ) return;
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = action === "install" ? "安装中…" : action === "update" ? "更新中…" : "卸载中…";
+  try {
+    let result = await api(`/dependencies/${encodeURIComponent(name)}/action`, {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    });
+    if (result.status && !["succeeded", "failed", "rolled_back"].includes(result.status)) {
+      result = await waitPackageOperation(result, button, "依赖操作");
+    }
+    if (result.status && result.status !== "succeeded") {
+      throw new Error(result.error || "依赖操作失败，原容器已恢复");
+    }
+    toast(`${name} ${action === "install" ? "已安装" : action === "update" ? "已更新" : "已卸载"}`);
+    await loadDependencies();
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
 }
 
 function configGroup(key) {
@@ -821,17 +1274,63 @@ function configGroup(key) {
   return namespace ? `${namespace} 配置` : "其他配置";
 }
 
+async function fetchConfigData({ preserveChanges = false } = {}) {
+  const pendingChanges = preserveChanges ? new Map(state.configChanges) : null;
+  const data = await api("/config");
+  state.configItems = data.items || [];
+  state.configOriginal = new Map(state.configItems.map((item) => [item.key, item.value]));
+  state.configChanges = pendingChanges || new Map();
+  $("#config-path").textContent = data.path;
+  updateSaveBar();
+  return data;
+}
+
 async function loadConfig() {
   try {
-    const data = await api("/config");
-    state.configItems = data.items || [];
-    state.configOriginal = new Map(state.configItems.map((item) => [item.key, item.value]));
-    state.configChanges.clear();
-    $("#config-path").textContent = data.path;
-    updateSaveBar();
+    await fetchConfigData();
     renderConfig();
+    await loadConfigBackups();
   } catch (error) {
     toast(error.message, "error");
+  }
+}
+
+async function loadConfigBackups() {
+  const select = $("#config-backup-select");
+  const button = $("#restore-config");
+  try {
+    const data = await api("/config/backups");
+    const items = data.items || [];
+    select.innerHTML = items.length
+      ? `<option value="">选择配置备份…</option>${items.map((item) => {
+        const label = `${new Date(item.created_at).toLocaleString("zh-CN")} · ${formatBytes(item.size)}`;
+        return `<option value="${escapeHtml(item.backup_id)}">${escapeHtml(label)}</option>`;
+      }).join("")}`
+      : '<option value="">没有可用备份</option>';
+    button.disabled = true;
+  } catch (error) {
+    select.innerHTML = '<option value="">备份列表不可用</option>';
+    button.disabled = true;
+  }
+}
+
+async function restoreConfigBackup() {
+  const select = $("#config-backup-select");
+  const backupId = select.value;
+  if (!backupId || !window.confirm("还原该配置备份？当前配置会先自动备份，之后需要重启 NoneBot。")) return;
+  const button = $("#restore-config");
+  button.disabled = true;
+  try {
+    await api("/config/restore", {
+      method: "POST",
+      body: JSON.stringify({ backup_id: backupId }),
+    });
+    toast("配置已还原，请重启 NoneBot 使其生效", "warning");
+    await loadConfig();
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -839,7 +1338,10 @@ function renderConfig() {
   const query = $("#config-search").value.trim().toLowerCase();
   const groups = new Map();
   state.configItems
-    .filter((item) => item.key.toLowerCase().includes(query))
+    .filter((item) => (
+      item.key.toLowerCase().includes(query)
+      && !state.plugins.some((plugin) => pluginConfigKeys(plugin).has(item.key))
+    ))
     .forEach((item) => {
       const name = configGroup(item.key);
       if (!groups.has(name)) groups.set(name, []);
@@ -850,9 +1352,10 @@ function renderConfig() {
       `<section class="config-group"><header class="config-group-head"><h2>${escapeHtml(name)}</h2><span>${items.length} 项配置</span></header>${items.map(configItemHtml).join("")}</section>`,
     ).join("")
     : '<div class="empty-state">没有找到匹配的配置</div>';
-  $$(".config-input").forEach((input) => input.addEventListener("input", () => changeConfig(input.dataset.key, input.value)));
-  $$(".secret-toggle").forEach((button) => button.addEventListener("click", () => {
-    const input = $(`.config-input[data-key="${CSS.escape(button.dataset.key)}"]`);
+  const configGroups = $("#config-groups");
+  $$(".config-input", configGroups).forEach((input) => input.addEventListener("input", () => changeConfig(input.dataset.key, input.value)));
+  $$(".secret-toggle", configGroups).forEach((button) => button.addEventListener("click", () => {
+    const input = $(`.config-input[data-key="${CSS.escape(button.dataset.key)}"]`, configGroups);
     input.type = input.type === "password" ? "text" : "password";
     button.textContent = input.type === "password" ? "显示" : "隐藏";
   }));
@@ -984,9 +1487,21 @@ async function clearLogs() {
   }
 }
 
-const BG_SOURCE_LABELS = { none: "无背景", url: "远程链接", upload: "本地上传" };
 const VISUAL_STORAGE_KEY = "mimo-console-visual";
 const VISUAL_DEFAULTS = { blur: 0, opacity: 92 };
+const BG_URL_AUTO_SAVE_DELAY = 900;
+let bgUrlSaveTimer = null;
+let bgUrlRevision = 0;
+// Serialize background mutations so a DELETE can never land on the server before
+// an in-flight PUT it was meant to supersede (strict last-write-wins on the wire).
+let bgMutationChain = Promise.resolve();
+
+function queueBgMutation(task) {
+  const run = bgMutationChain.then(task, task);
+  // Keep the chain alive even if a task rejects.
+  bgMutationChain = run.catch(() => {});
+  return run;
+}
 
 function resolveBgUrl(data) {
   const source = (data && data.source) || "none";
@@ -1010,8 +1525,12 @@ function applyVisualSettings(settings, save = false) {
   const root = document.documentElement;
   const blur = Math.min(24, Math.max(0, Number(settings.blur) || 0));
   const opacity = Math.min(100, Math.max(50, Number(settings.opacity) || VISUAL_DEFAULTS.opacity));
+  const controlOpacity = Math.max(28, opacity - 22);
+  const insetOpacity = Math.max(18, opacity - 36);
   root.style.setProperty("--blur-intensity", `${blur}px`);
   root.style.setProperty("--card-opacity", `${opacity}%`);
+  root.style.setProperty("--control-opacity", `${controlOpacity}%`);
+  root.style.setProperty("--inset-opacity", `${insetOpacity}%`);
   const blurInput = $("#bg-blur-input");
   const opacityInput = $("#card-opacity-input");
   if (blurInput) blurInput.value = String(blur);
@@ -1160,19 +1679,15 @@ function updateAppearanceUi(data) {
   const radio = $(`#bg-mode-${source}`);
   if (radio) radio.checked = true;
   switchBgMode(source);
-  const label = BG_SOURCE_LABELS[source] || "无背景";
-  const chip = $("#bg-source-chip");
-  const pill = $("#bg-status-pill");
-  if (chip) chip.textContent = label;
-  if (pill) pill.textContent = `当前：${label}`;
-  const preview = $("#bg-preview");
-  if (preview) {
-    const bgUrl = resolveBgUrl(data);
-    preview.style.backgroundImage = bgUrl ? `url("${bgUrl}")` : "none";
-    preview.classList.toggle("empty", !bgUrl);
-  }
   const urlInput = $("#bg-url-input");
-  if (urlInput && source === "url" && data.url) urlInput.value = data.url;
+  if (urlInput && source === "url" && data.url) {
+    urlInput.value = data.remote_url || data.url;
+  }
+  const urlStatus = $("#bg-url-status");
+  if (urlStatus && source === "url" && data.url) {
+    urlStatus.textContent = "当前图片已自动下载并应用";
+    urlStatus.dataset.tone = "success";
+  }
 }
 
 function switchBgMode(mode) {
@@ -1180,18 +1695,86 @@ function switchBgMode(mode) {
   $("#bg-upload-field").classList.toggle("hidden", mode !== "upload");
 }
 
-async function saveBgUrl() {
-  const url = ($("#bg-url-input").value || "").trim();
-  if (!url) { toast("请填写图片 URL", "error"); return; }
-  const button = $("#bg-url-save");
-  button.disabled = true;
+async function selectBackgroundMode(mode) {
+  switchBgMode(mode);
+  // Invalidate any pending URL download so a queued/in-flight PUT cannot write a
+  // background back after the user switches away. saveBgUrl checks bgUrlRevision.
+  clearTimeout(bgUrlSaveTimer);
+  bgUrlRevision += 1;
+  if (mode !== "none") return;
+  const radios = $$("input[name='bg-mode']");
+  radios.forEach((radio) => { radio.disabled = true; });
   try {
-    applyBackground(await api("/background", { method: "PUT", body: JSON.stringify({ url }) }));
-    toast("背景已更新");
+    applyBackground(await queueBgMutation(() => api("/background", { method: "DELETE" })));
+    $("#bg-url-input").value = "";
+    toast("背景已清除");
   } catch (error) {
+    updateAppearanceUi(state.background);
     toast(error.message, "error");
   } finally {
-    button.disabled = false;
+    radios.forEach((radio) => { radio.disabled = false; });
+  }
+}
+
+function setBgUrlStatus(message, tone = "") {
+  const status = $("#bg-url-status");
+  if (!status) return;
+  status.textContent = message;
+  if (tone) status.dataset.tone = tone;
+  else delete status.dataset.tone;
+}
+
+function normalizeAutoBackgroundUrl(value) {
+  try {
+    const parsed = new URL((value || "").trim());
+    return ["http:", "https:"].includes(parsed.protocol) && parsed.hostname
+      ? parsed.toString()
+      : "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function queueBgUrlSave(input, immediate = false) {
+  bgUrlRevision += 1;
+  const revision = bgUrlRevision;
+  clearTimeout(bgUrlSaveTimer);
+  const raw = (input.value || "").trim();
+  if (!raw) {
+    setBgUrlStatus("输入完成后将自动下载并应用图片");
+    return;
+  }
+  const url = normalizeAutoBackgroundUrl(raw);
+  if (!url) {
+    setBgUrlStatus("请输入完整的 http/https 图片地址");
+    return;
+  }
+  setBgUrlStatus(immediate ? "正在下载图片…" : "等待输入完成…");
+  bgUrlSaveTimer = setTimeout(
+    () => saveBgUrl(url, revision),
+    immediate ? 0 : BG_URL_AUTO_SAVE_DELAY,
+  );
+}
+
+async function saveBgUrl(url, revision) {
+  const input = $("#bg-url-input");
+  input.setAttribute("aria-busy", "true");
+  setBgUrlStatus("正在下载图片…");
+  try {
+    const payload = await queueBgMutation(() =>
+      api("/background", {
+        method: "PUT",
+        body: JSON.stringify({ url }),
+      }),
+    );
+    if (revision !== bgUrlRevision) return;
+    applyBackground(payload);
+    setBgUrlStatus("图片已自动下载并应用", "success");
+  } catch (error) {
+    if (revision !== bgUrlRevision) return;
+    setBgUrlStatus(error.message, "error");
+  } finally {
+    if (revision === bgUrlRevision) input.removeAttribute("aria-busy");
   }
 }
 
@@ -1208,10 +1791,15 @@ async function uploadBgFile(input) {
   const original = strong.textContent;
   strong.textContent = "上传中…";
   label.disabled = true;
+  // Cancel any pending URL download so it cannot overwrite the upload afterwards.
+  clearTimeout(bgUrlSaveTimer);
+  bgUrlRevision += 1;
   try {
     const form = new FormData();
     form.append("file", file);
-    applyBackground(await api("/background/upload", { method: "POST", body: form }));
+    applyBackground(
+      await queueBgMutation(() => api("/background/upload", { method: "POST", body: form })),
+    );
     toast("背景已更新");
   } catch (error) {
     toast(error.message, "error");
@@ -1219,20 +1807,6 @@ async function uploadBgFile(input) {
     strong.textContent = original;
     label.disabled = false;
     input.value = "";
-  }
-}
-
-async function resetBg() {
-  const button = $("#bg-reset");
-  button.disabled = true;
-  try {
-    applyBackground(await api("/background", { method: "DELETE" }));
-    $("#bg-url-input").value = "";
-    toast("背景已清除");
-  } catch (error) {
-    toast(error.message, "error");
-  } finally {
-    button.disabled = false;
   }
 }
 
@@ -1245,6 +1819,93 @@ async function loadVersion() {
 
 function renderVersion(data) {
   $("#version-current").textContent = data.current ? `v${data.current}` : "--";
+}
+
+function pluginConfigKeys(item) {
+  const declared = new Set((item.config_keys || []).map((key) => String(key).toUpperCase()));
+  if (declared.size) return declared;
+  const module = String(item.module || item.name || "").replace(/^nonebot_plugin_/, "");
+  const prefix = `${module.replace(/[^A-Za-z0-9]+/g, "_").toUpperCase()}_`;
+  state.configItems.forEach((config) => {
+    if (config.key.startsWith(prefix)) declared.add(config.key);
+  });
+  return declared;
+}
+
+function detailConfigItemHtml(item) {
+  return `<div class="detail-config-item">
+    <div class="config-key">
+      <strong>${escapeHtml(item.key)}</strong>
+      <span>${item.secret ? "敏感配置 · 留空可清除" : "环境变量"}</span>
+    </div>
+    <div class="config-input-wrap">
+      <input class="config-input detail-config-input" data-key="${escapeHtml(item.key)}" type="${item.secret ? "password" : "text"}" value="${escapeHtml(item.value)}">
+      ${item.secret ? `<button class="secret-toggle detail-secret-toggle" data-key="${escapeHtml(item.key)}" type="button">显示</button>` : ""}
+    </div>
+  </div>`;
+}
+
+function renderDetailPluginConfig(plugin) {
+  const target = $("#detail-plugin-config");
+  if (!target) return;
+  const keys = pluginConfigKeys(plugin);
+  const existing = new Map(state.configItems.map((item) => [item.key, item]));
+  const items = [...keys]
+    .sort()
+    .map((key) => existing.get(key) || {
+      key,
+      value: "",
+      secret: /(TOKEN|SECRET|PASSWORD|COOKIE|API_KEY|ACCESS_KEY)/u.test(key),
+    });
+  const prefix = String(plugin.module || plugin.name || "")
+    .replace(/^nonebot_plugin_/, "")
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .toUpperCase();
+  target.innerHTML = `
+    <div class="detail-section-head">
+      <div><h3>插件配置</h3><p>保存后需要重启 NoneBot 才会生效</p></div>
+      <span class="badge">${items.length} 项</span>
+    </div>
+    ${items.length
+      ? `<div class="detail-config-list">${items.map(detailConfigItemHtml).join("")}</div>
+         <div class="detail-config-actions">
+           <span id="detail-config-status" class="text-muted">配置前缀：${escapeHtml(prefix)}_</span>
+           <button id="detail-config-save" class="btn btn-primary btn-sm" type="button" disabled>保存插件配置</button>
+         </div>`
+      : `<div class="empty-state compact">暂未发现该插件声明的环境变量配置</div>`}
+  `;
+  const changed = new Map();
+  $$(".detail-config-input", target).forEach((input) => {
+    input.addEventListener("input", () => {
+      const original = state.configOriginal.get(input.dataset.key);
+      if (input.value === original) changed.delete(input.dataset.key);
+      else changed.set(input.dataset.key, input.value);
+      $("#detail-config-save").disabled = changed.size === 0;
+    });
+  });
+  $$(".detail-secret-toggle", target).forEach((button) => {
+    button.addEventListener("click", () => {
+      const input = $(`.detail-config-input[data-key="${CSS.escape(button.dataset.key)}"]`, target);
+      input.type = input.type === "password" ? "text" : "password";
+      button.textContent = input.type === "password" ? "显示" : "隐藏";
+    });
+  });
+  const save = $("#detail-config-save");
+  if (save) save.addEventListener("click", async () => {
+    save.disabled = true;
+    try {
+      await api("/config", {
+        method: "PUT",
+        body: JSON.stringify({ values: Object.fromEntries(changed) }),
+      });
+      toast("插件配置已保存，重启 NoneBot 后生效", "warning");
+      await fetchConfigData({ preserveChanges: true });
+      if (state.detailPlugin === plugin) renderDetailPluginConfig(plugin);
+    } catch (error) {
+      toast(error.message, "error");
+      save.disabled = false;
+    }
+  });
 }
 
 const PROXY_CUSTOM_VALUE = "__custom__";
@@ -1291,7 +1952,6 @@ function renderProxySettings() {
       !checked || checked.value !== PROXY_CUSTOM_VALUE,
     );
   };
-  updateProxyStatus();
 }
 
 function selectedProxyValue() {
@@ -1299,11 +1959,6 @@ function selectedProxyValue() {
   if (!checked) return "";
   if (checked.value === PROXY_CUSTOM_VALUE) return ($("#proxy-custom-input").value || "").trim();
   return checked.value;
-}
-
-function updateProxyStatus() {
-  const current = state.proxy.proxy || "";
-  $("#proxy-status").textContent = current ? `当前：${current}` : "当前：直连";
 }
 
 async function saveProxySettings() {
@@ -1376,7 +2031,16 @@ async function checkUpdate() {
 
 async function runUpdate() {
   try {
-    await api("/system/update", { method: "POST" });
+    let result = await api("/system/update", { method: "POST" });
+    if (result.status && !["succeeded", "failed", "rolled_back"].includes(result.status)) {
+      result = await waitPackageOperation(result, $("#check-update-btn"), "更新");
+      if (result.status !== "succeeded") {
+        throw new Error(result.error || "更新失败，原容器已恢复");
+      }
+      toast("Mimo Console 已更新并完成容器切换");
+      location.reload();
+      return;
+    }
     toast("已更新，正在重启…", "warning");
     pollRestart();
   } catch (error) {
@@ -1385,16 +2049,31 @@ async function runUpdate() {
 }
 
 async function restartNonebot() {
-  if (!window.confirm("确定重启 NoneBot？进程将退出，并由外部进程管理器重新拉起。未保存的操作会丢失。")) return;
+  const dockerMode = state.deployment.mode === "docker-agent";
+  const detail = dockerMode
+    ? "Mimo Agent 将重建当前服务并执行健康检查。"
+    : "进程将退出，并由外部进程管理器重新拉起。未保存的操作会丢失。";
+  if (!window.confirm(`确定重启 NoneBot？${detail}`)) return;
   const button = $("#restart-button");
+  const original = button.innerHTML;
   button.disabled = true;
   try {
-    await api("/system/restart", { method: "POST" });
+    const result = await api("/system/restart", { method: "POST" });
+    if (result.operation_id) {
+      const completed = await waitPackageOperation(result, null, "重启");
+      if (completed.status !== "succeeded") {
+        throw new Error(completed.error || "容器重启失败，已尝试恢复");
+      }
+      toast("NoneBot 容器已重启");
+      location.reload();
+      return;
+    }
     toast("已发送重启信号，正在退出…", "warning");
     pollRestart();
   } catch (error) {
     toast(error.message, "error");
     button.disabled = false;
+    button.innerHTML = original;
   }
 }
 
@@ -1415,57 +2094,108 @@ async function pollRestart() {
   toast("重启后长时间未恢复，请手动检查进程与外部管理器", "error");
 }
 
-/* ===== Lightweight Markdown to HTML ===== */
-function renderMarkdown(md) {
-  let html = escapeHtml(md);
-  // Code blocks (```...```)
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
-    `<pre><code class="language-${lang}">${code.trim()}</code></pre>`);
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-  // Images (before links so ![...](...) isn't consumed as a link)
-  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => {
-    const safeSrc = safeUrl(src) || safeImageUrl(src);
-    return safeSrc ? `<img src="${safeSrc}" alt="${alt}" loading="lazy" referrerpolicy="no-referrer">` : alt;
-  });
-  // Links
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, href) => {
-    const safeHref = safeUrl(href);
-    return safeHref ? `<a href="${safeHref}" target="_blank" rel="noreferrer">${text}</a>` : text;
-  });
-  // Headings
-  html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
-  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-  // Horizontal rule
-  html = html.replace(/^---+$/gm, '<hr>');
-  // Bold + italic
-  html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  // Blockquote
-  html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
-  // Unordered list items
-  html = html.replace(/^[*-] (.+)$/gm, '<li>$1</li>');
-  // Wrap consecutive <li> in <ul>
-  html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
-  // Paragraphs: wrap remaining plain text blocks
-  html = html.replace(/^(?!<[hulpbo]|<\/?[hulpbo])(.+)$/gm, '<p>$1</p>');
-  // Clean up empty paragraphs and extra newlines
-  html = html.replace(/<p><\/p>/g, '');
-  html = html.replace(/\n{2,}/g, '\n');
-  return html;
+/* ===== Sanitized README HTML rendered by markdown-it-py ===== */
+const README_ALLOWED_TAGS = new Set([
+  "a", "p", "br", "hr",
+  "h1", "h2", "h3", "h4", "h5", "h6",
+  "blockquote", "pre", "code", "kbd",
+  "ul", "ol", "li",
+  "table", "thead", "tbody", "tr", "th", "td",
+  "strong", "b", "em", "i", "s", "del",
+  "img", "details", "summary", "sup", "sub", "div", "span",
+]);
+
+function readmeIntegerAttribute(value, minimum, maximum) {
+  const number = Number.parseInt(String(value || ""), 10);
+  return Number.isFinite(number) ? Math.min(maximum, Math.max(minimum, number)) : 0;
 }
 
-async function loadPluginReadme(moduleName) {
+function sanitizeReadmeHtml(markup, baseUrl = "") {
+  const template = document.createElement("template");
+  template.innerHTML = String(markup || "");
+  template.content
+    .querySelectorAll("script,style,iframe,object,embed,form,input,button,textarea,select,meta,link")
+    .forEach((element) => element.remove());
+
+  [...template.content.querySelectorAll("*")].forEach((element) => {
+    const tag = element.tagName.toLowerCase();
+    if (!README_ALLOWED_TAGS.has(tag)) {
+      element.replaceWith(...element.childNodes);
+      return;
+    }
+
+    const attributes = Object.fromEntries(
+      [...element.attributes].map((attribute) => [attribute.name.toLowerCase(), attribute.value]),
+    );
+    [...element.attributes].forEach((attribute) => element.removeAttribute(attribute.name));
+
+    const alignment = (
+      attributes.align
+      || attributes.style?.match(/text-align\s*:\s*(left|center|right)/i)?.[1]
+      || ""
+    ).toLowerCase();
+    if (["left", "center", "right"].includes(alignment)) {
+      element.classList.add(`readme-align-${alignment}`);
+    }
+
+    if (tag === "a") {
+      const href = normalizeWebUrl(attributes.href, baseUrl);
+      if (href) {
+        element.setAttribute("href", href);
+        element.setAttribute("target", "_blank");
+        element.setAttribute("rel", "noopener noreferrer");
+      }
+      if (attributes.title) element.setAttribute("title", attributes.title.slice(0, 300));
+    } else if (tag === "img") {
+      const source = normalizeWebUrl(attributes.src, baseUrl);
+      if (!source) {
+        element.remove();
+        return;
+      }
+      element.setAttribute("src", source);
+      element.setAttribute("alt", (attributes.alt || "").slice(0, 300));
+      element.setAttribute("loading", "lazy");
+      element.setAttribute("referrerpolicy", "no-referrer");
+      const width = readmeIntegerAttribute(attributes.width, 16, 1200);
+      const height = readmeIntegerAttribute(attributes.height, 16, 1200);
+      if (width) element.setAttribute("width", String(width));
+      if (height) element.setAttribute("height", String(height));
+      if (attributes.title) element.setAttribute("title", attributes.title.slice(0, 300));
+    } else if (tag === "th" || tag === "td") {
+      const colspan = readmeIntegerAttribute(attributes.colspan, 1, 20);
+      const rowspan = readmeIntegerAttribute(attributes.rowspan, 1, 100);
+      if (colspan) element.setAttribute("colspan", String(colspan));
+      if (rowspan) element.setAttribute("rowspan", String(rowspan));
+    } else if (tag === "ol") {
+      const start = readmeIntegerAttribute(attributes.start, 1, 100000);
+      if (start) element.setAttribute("start", String(start));
+    } else if (tag === "li") {
+      const value = readmeIntegerAttribute(attributes.value, 1, 100000);
+      if (value) element.setAttribute("value", String(value));
+    } else if (tag === "details" && Object.hasOwn(attributes, "open")) {
+      element.setAttribute("open", "");
+    } else if (tag === "code" && /^language-[a-z0-9_+-]+$/i.test(attributes.class || "")) {
+      element.setAttribute("class", attributes.class);
+    }
+  });
+
+  const commentWalker = document.createTreeWalker(template.content, NodeFilter.SHOW_COMMENT);
+  const comments = [];
+  while (commentWalker.nextNode()) comments.push(commentWalker.currentNode);
+  comments.forEach((comment) => comment.remove());
+  return template.innerHTML;
+}
+
+async function loadPluginReadme(moduleName, source = "store") {
   const readmeContainer = document.getElementById("detail-readme");
   if (!readmeContainer) return;
   readmeContainer.innerHTML = '<div class="empty-text">正在加载 README…</div>';
   try {
-    const data = await api(`/store/plugins/${encodeURIComponent(moduleName)}/readme`);
-    if (data.ok && data.content) {
-      readmeContainer.innerHTML = `<div class="markdown-body">${renderMarkdown(data.content)}</div>`;
+    const prefix = source === "loaded" ? "/plugins" : "/store/plugins";
+    const data = await api(`${prefix}/${encodeURIComponent(moduleName)}/readme`);
+    if (data.ok && data.content_html) {
+      const html = sanitizeReadmeHtml(data.content_html, data.base_url || "");
+      readmeContainer.innerHTML = `<div class="markdown-body">${html}</div>`;
     } else {
       readmeContainer.innerHTML = `<div class="empty-text">${escapeHtml(data.detail || "暂无 README")}</div>`;
     }

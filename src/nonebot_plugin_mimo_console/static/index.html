@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./assets/styles.css?v=1.0.0">
+  <link rel="stylesheet" href="./assets/styles.css?v=1.3.8">
 </head>
 <body>
   <div id="bg-layer" class="bg-layer"></div>
@@ -83,9 +83,13 @@
           <span>插件</span>
           <em id="nav-plugin-count">0</em>
         </button>
+        <button class="nav-item" data-page="dependencies">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+          <span>依赖管理</span>
+        </button>
         <button class="nav-item" data-page="config">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-          <span>配置</span>
+          <span>核心配置</span>
         </button>
         <button class="nav-item" data-page="logs">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
@@ -101,10 +105,13 @@
       <div class="sidebar-footer">
         <div class="status-indicator">
           <span class="status-dot online"></span>
-          <div>
+          <div class="status-copy">
             <strong>NoneBot 在线</strong>
             <small id="sidebar-uptime">已运行 --</small>
           </div>
+          <button id="restart-button" class="icon-btn restart-icon-button" type="button" aria-label="重启服务" title="重启服务">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18.36 6.64A9 9 0 115.64 6.64"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+          </button>
         </div>
         <div class="profile-row">
           <div id="avatar" class="avatar">M</div>
@@ -116,7 +123,6 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
           </button>
         </div>
-        <div class="sidebar-version">Mimo Console · v0.1.5</div>
       </div>
     </aside>
 
@@ -146,74 +152,22 @@
         <section id="page-dashboard" class="page active">
           <div class="page-welcome card">
             <div>
-              <p class="welcome-label" id="welcome-date">Mimo Console</p>
+              <div class="welcome-kicker">
+                <strong id="version-current" class="welcome-version">--</strong>
+                <button class="welcome-update-button" id="check-update-btn" type="button">检测更新</button>
+                <span class="welcome-kicker-divider"></span>
+                <p class="welcome-label" id="welcome-date">Mimo Console</p>
+              </div>
               <h1><span id="greeting">早上好</span>，<b id="welcome-name">Admin</b></h1>
               <p class="text-muted">查看运行状态、管理插件与配置。</p>
             </div>
-            <div class="welcome-side">
-              <div class="version-info">
-                <span>控制台版本</span>
-                <strong id="version-current">--</strong>
-              </div>
-              <div class="welcome-actions">
-                <button class="btn btn-sm" id="check-update-btn" type="button">检测更新</button>
-                <button id="restart-button" class="btn btn-ghost btn-sm" type="button">重启</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="metrics-grid">
-            <article class="metric-card card">
-              <div class="metric-header">
-                <span class="metric-icon blue">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
-                </span>
-                <span>CPU</span>
-              </div>
-              <strong id="cpu-value">--%</strong>
-              <p id="cpu-sub">-- 核心</p>
-              <div class="progress"><div id="cpu-bar" class="progress-fill" style="width:0%"></div></div>
-            </article>
-            <article class="metric-card card">
-              <div class="metric-header">
-                <span class="metric-icon purple">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="12" x2="6.01" y2="12"/><line x1="10" y1="12" x2="18" y2="12"/></svg>
-                </span>
-                <span>内存</span>
-              </div>
-              <strong id="memory-value">--%</strong>
-              <p id="memory-sub">-- / --</p>
-              <div class="progress"><div id="memory-bar" class="progress-fill" style="width:0%"></div></div>
-            </article>
-            <article class="metric-card card">
-              <div class="metric-header">
-                <span class="metric-icon teal">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-                </span>
-                <span>存储</span>
-              </div>
-              <strong id="disk-value">--%</strong>
-              <p id="disk-sub">-- / --</p>
-              <div class="progress"><div id="disk-bar" class="progress-fill" style="width:0%"></div></div>
-            </article>
-            <article class="metric-card card">
-              <div class="metric-header">
-                <span class="metric-icon pink">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a5 5 0 015 5c0 2-1 3-2 4s-3 3-3 5M12 18v2"/></svg>
-                </span>
-                <span>机器人</span>
-              </div>
-              <strong id="bot-value">0</strong>
-              <p id="bot-sub">0 个适配器</p>
-              <div class="progress"><div id="bot-bar" class="progress-fill" style="width:0%"></div></div>
-            </article>
           </div>
 
           <div class="dashboard-grid">
             <article class="card">
               <div class="card-header">
                 <h2>资源占用</h2>
-                <span class="badge">实时</span>
+                <div class="live-indicator"><span class="status-dot online"></span>实时</div>
               </div>
               <div class="rings-grid">
                 <div class="ring-item">
@@ -252,20 +206,20 @@
             </article>
           </div>
 
-          <article class="card">
+          <article class="card dashboard-section-card">
             <div class="card-header">
               <h2>最近日志</h2>
-              <button class="btn-link" data-goto="logs">查看全部</button>
+              <button class="btn btn-ghost btn-sm" data-goto="logs">查看全部</button>
             </div>
             <div id="recent-logs" class="recent-logs">
               <div class="empty-text">正在等待日志…</div>
             </div>
           </article>
 
-          <article class="card">
+          <article class="card dashboard-section-card">
             <div class="card-header">
               <h2>GitHub 加速</h2>
-              <button class="btn btn-sm" id="proxy-test-btn" type="button">测试连通性</button>
+              <button class="btn btn-secondary btn-sm" id="proxy-test-btn" type="button">测试连通性</button>
             </div>
             <p class="text-muted mb-md">用于控制台自身的版本检测与在线更新，保存后立即生效。</p>
             <div class="radio-group" id="proxy-modes"></div>
@@ -277,38 +231,57 @@
             </div>
             <div class="action-row">
               <button id="proxy-save" class="btn btn-primary" type="button">保存设置</button>
-              <span id="proxy-status" class="text-muted"></span>
             </div>
           </article>
         </section>
 
         <!-- Plugins -->
         <section id="page-plugins" class="page">
-          <div class="page-header">
-            <div>
-              <h1>插件中心</h1>
-              <p class="text-muted">管理已加载插件，浏览官方商店详情</p>
+          <div class="page-stack-card page-intro-card card">
+            <div class="page-header">
+              <div>
+                <h1>插件中心</h1>
+                <p class="text-muted">管理已安装插件，浏览官方商店详情</p>
+              </div>
+              <div class="page-head-actions">
+                <div class="stat-badge">
+                  <strong id="plugin-total">0</strong>
+                  <span>已安装</span>
+                </div>
+              </div>
             </div>
-            <div class="stat-badge">
-              <strong id="plugin-total">0</strong>
-              <span>已加载</span>
+
+            <div class="tabs-bar">
+              <button class="tab active" data-plugin-tab="installed" role="tab">
+                已安装 <em id="loaded-tab-count">0</em>
+              </button>
+              <button class="tab" data-plugin-tab="store" role="tab">
+                官方商店 <em id="store-tab-count">—</em>
+              </button>
+              <div class="tabs-actions">
+                <button id="github-install-button" class="btn btn-primary btn-sm hidden" type="button">
+                  从 GitHub 安装
+                </button>
+                <a class="tab-link" href="https://nonebot.dev/store/plugins" target="_blank" rel="noreferrer">NoneBot 商店 ↗</a>
+              </div>
             </div>
           </div>
 
-          <div class="tabs-bar card">
-            <button class="tab active" data-plugin-tab="installed" role="tab">
-              已加载 <em id="loaded-tab-count">0</em>
-            </button>
-            <button class="tab" data-plugin-tab="store" role="tab">
-              官方商店 <em id="store-tab-count">—</em>
-            </button>
-            <a class="tab-link" href="https://nonebot.dev/store/plugins" target="_blank" rel="noreferrer">NoneBot 商店 ↗</a>
-          </div>
+          <article id="deployment-panel" class="card deployment-panel hidden">
+            <div class="panel-head">
+              <div>
+                <h2>Docker 部署</h2>
+                <p id="deployment-summary" class="muted">正在连接宿主机 Agent…</p>
+              </div>
+              <button id="deployment-refresh" class="btn btn-secondary btn-sm" type="button">刷新记录</button>
+            </div>
+            <div id="deployment-operations" class="deployment-operations"></div>
+          </article>
 
           <div class="toolbar card">
             <div class="search-box">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input id="plugin-search" autocomplete="off" placeholder="搜索已加载插件">
+              <input id="plugin-search" autocomplete="off" placeholder="搜索已安装插件">
             </div>
             <label id="official-filter" class="switch-label hidden">
               <input id="official-only" type="checkbox">
@@ -328,33 +301,86 @@
           <div id="plugin-result-meta" class="result-meta"></div>
           <div id="plugin-grid" class="plugin-grid"></div>
           <div id="store-pagination" class="pagination hidden">
-            <button id="store-prev" class="btn btn-ghost btn-sm">上一页</button>
+            <button id="store-prev" class="btn btn-secondary btn-sm">上一页</button>
             <span id="store-page-label">第 1 / 1 页</span>
-            <button id="store-next" class="btn btn-ghost btn-sm">下一页</button>
+            <button id="store-next" class="btn btn-secondary btn-sm">下一页</button>
           </div>
+        </section>
+
+        <!-- Dependencies -->
+        <section id="page-dependencies" class="page">
+          <div class="page-stack-card page-intro-card card">
+            <div class="page-header">
+              <div>
+                <h1>依赖管理</h1>
+                <p class="text-muted">查看运行环境中的 Python 包，管理项目直接依赖</p>
+              </div>
+              <div class="stat-badge">
+                <strong id="dependency-direct-count">0</strong>
+                <span>项目依赖</span>
+              </div>
+            </div>
+            <div class="notice info">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              <span id="dependency-mode-notice">正在自动识别 NoneBot 的安装方式…</span>
+            </div>
+          </div>
+          <div class="page-stack-card dependency-tools-card card">
+            <form id="dependency-install-form" class="dependency-install-card">
+              <div>
+                <h2>安装新依赖</h2>
+                <p>输入 PyPI 包名，例如 <span class="mono">pillow</span> 或 <span class="mono">httpx</span></p>
+              </div>
+              <div class="dependency-install-controls">
+                <input id="dependency-name" class="config-input" autocomplete="off" placeholder="Python 包名">
+                <button id="dependency-install-button" class="btn btn-primary" type="submit">安装依赖</button>
+              </div>
+            </form>
+            <div class="toolbar">
+              <div class="search-box">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input id="dependency-search" autocomplete="off" placeholder="搜索包名、版本或约束">
+              </div>
+              <select id="dependency-filter" class="select" aria-label="依赖类型">
+                <option value="direct">项目直接依赖</option>
+                <option value="all">全部已安装包</option>
+                <option value="transitive">仅间接依赖</option>
+              </select>
+            </div>
+          </div>
+          <div id="dependency-result-meta" class="result-meta"></div>
+          <div id="dependency-list" class="dependency-list"></div>
         </section>
 
         <!-- Config -->
         <section id="page-config" class="page">
-          <div class="page-header">
-            <div>
-              <h1>运行配置</h1>
-              <p class="text-muted">编辑环境变量，保存后需重启生效</p>
+          <div class="page-stack-card page-intro-card card">
+            <div class="page-header">
+              <div>
+                <h1>核心配置</h1>
+                <p class="text-muted">管理 NoneBot 与未归属插件的环境变量</p>
+              </div>
+              <span id="config-path" class="badge-outline">正在读取…</span>
             </div>
-            <span id="config-path" class="badge-outline">正在读取…</span>
-          </div>
-          <div class="notice warning">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-            <span>保存后请重启 NoneBot 使配置生效</span>
-          </div>
-          <div class="toolbar card">
-            <div class="search-box">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input id="config-search" placeholder="搜索配置项">
+            <div class="notice warning">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              <span>保存后请重启 NoneBot 使配置生效</span>
             </div>
-            <button id="add-config" class="btn btn-sm">+ 新增</button>
           </div>
-          <div id="config-groups" class="config-groups"></div>
+          <div class="page-stack-card config-workspace-card card">
+            <div class="toolbar">
+              <div class="search-box">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input id="config-search" placeholder="搜索配置项">
+              </div>
+              <select id="config-backup-select" class="select" aria-label="配置备份">
+                <option value="">没有可用备份</option>
+              </select>
+              <button id="restore-config" class="btn btn-secondary" disabled>还原备份</button>
+              <button id="add-config" class="btn btn-secondary btn-sm">+ 新增</button>
+            </div>
+            <div id="config-groups" class="config-groups"></div>
+          </div>
           <div id="save-bar" class="save-bar">
             <div>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -390,7 +416,7 @@
               <option>ERROR</option>
               <option>CRITICAL</option>
             </select>
-            <button id="log-follow" class="btn btn-sm active">自动滚动</button>
+            <button id="log-follow" class="btn btn-secondary btn-sm active">自动滚动</button>
             <button id="clear-logs" class="btn btn-danger btn-sm">清空</button>
           </div>
           <div class="terminal card">
@@ -407,23 +433,66 @@
 
         <!-- Appearance -->
         <section id="page-appearance" class="page">
-          <div class="page-header">
-            <div>
-              <h1>外观</h1>
-              <p class="text-muted">自定义主题与背景图</p>
+          <div class="page-stack-card page-intro-card card">
+            <div class="page-header">
+              <div>
+                <h1>外观</h1>
+                <p class="text-muted">自定义主题与背景图</p>
+              </div>
             </div>
-            <span id="bg-status-pill" class="badge-outline">当前：无背景</span>
-          </div>
-
-          <div class="notice info">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-            <span>设置立即生效、无需重启；背景图对所有管理员生效，主题仅保存在当前浏览器。</span>
+            <div class="notice info">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              <span>所有调整都会立即生效，无需重启。背景图会同步给所有管理员，主题偏好仅保存在当前浏览器。</span>
+            </div>
           </div>
 
           <div class="appearance-grid">
-            <article class="card">
-              <div class="card-header"><h2>预览</h2><span class="badge" id="bg-source-chip">无背景</span></div>
-              <div id="bg-preview" class="bg-preview empty"></div>
+            <article class="card theme-card">
+              <div class="card-header"><h2>主题</h2><span class="badge">仅当前浏览器</span></div>
+              <div class="theme-settings">
+                <div class="theme-section">
+                  <div class="section-label">
+                    <span>显示模式</span>
+                    <small>选择浅色、深色，或跟随当前系统设置</small>
+                  </div>
+                  <div class="radio-group compact">
+                    <label class="radio-option">
+                      <input type="radio" name="theme-mode" value="light" id="theme-mode-light" checked>
+                      <div><strong>浅色</strong></div>
+                    </label>
+                    <label class="radio-option">
+                      <input type="radio" name="theme-mode" value="dark" id="theme-mode-dark">
+                      <div><strong>深色</strong></div>
+                    </label>
+                    <label class="radio-option">
+                      <input type="radio" name="theme-mode" value="system" id="theme-mode-system">
+                      <div><strong>跟随系统</strong></div>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="theme-section">
+                  <div class="section-label">
+                    <span>强调色</span>
+                    <small>用于按钮、选中状态和关键数据</small>
+                  </div>
+                  <div class="accent-swatches" id="accent-swatches">
+                    <button class="swatch" type="button" data-accent="" style="background:#6366f1" aria-label="靛蓝" title="靛蓝"></button>
+                    <button class="swatch" type="button" data-accent="#8b5cf6" style="background:#8b5cf6" aria-label="紫色" title="紫色"></button>
+                    <button class="swatch" type="button" data-accent="#ec4899" style="background:#ec4899" aria-label="粉色" title="粉色"></button>
+                    <button class="swatch" type="button" data-accent="#14b8a6" style="background:#14b8a6" aria-label="青色" title="青色"></button>
+                    <button class="swatch" type="button" data-accent="#f97316" style="background:#f97316" aria-label="橙色" title="橙色"></button>
+                    <button class="swatch" type="button" data-accent="#64748b" style="background:#64748b" aria-label="灰蓝" title="灰蓝"></button>
+                    <label class="swatch custom" aria-label="自定义" title="自定义">+<input type="color" id="accent-custom-input" value="#6366f1"></label>
+                  </div>
+                </div>
+
+                <div class="theme-section theme-footer">
+                  <div class="action-row">
+                    <button id="theme-reset" class="btn btn-secondary btn-sm" type="button">恢复默认主题</button>
+                  </div>
+                </div>
+              </div>
             </article>
 
             <article class="card">
@@ -448,7 +517,7 @@
                   <span>图片 URL</span>
                   <input id="bg-url-input" type="text" autocomplete="off" placeholder="https://example.com/wallpaper.jpg">
                 </label>
-                <button id="bg-url-save" class="btn btn-primary btn-sm" type="button">应用链接</button>
+                <small id="bg-url-status" class="field-status">输入完成后将自动下载并应用图片</small>
               </div>
 
               <div id="bg-upload-field" class="field-group hidden">
@@ -471,53 +540,8 @@
                 <small class="visual-settings-hint">仅在使用自定义背景图时生效，并保存在当前浏览器。</small>
               </div>
 
-              <div class="action-row">
-                <button id="bg-reset" class="btn btn-ghost btn-sm" type="button">清除背景</button>
-              </div>
             </article>
           </div>
-
-          <article class="card">
-            <div class="card-header"><h2>主题</h2><span class="badge">仅保存在当前浏览器</span></div>
-            <div class="theme-settings">
-              <div class="theme-section">
-                <label class="section-label">模式</label>
-                <div class="radio-group compact">
-                  <label class="radio-option">
-                    <input type="radio" name="theme-mode" value="light" id="theme-mode-light" checked>
-                    <div><strong>浅色</strong></div>
-                  </label>
-                  <label class="radio-option">
-                    <input type="radio" name="theme-mode" value="dark" id="theme-mode-dark">
-                    <div><strong>深色</strong></div>
-                  </label>
-                  <label class="radio-option">
-                    <input type="radio" name="theme-mode" value="system" id="theme-mode-system">
-                    <div><strong>跟随系统</strong></div>
-                  </label>
-                </div>
-              </div>
-
-              <div class="theme-section">
-                <label class="section-label">强调色</label>
-                <div class="accent-swatches" id="accent-swatches">
-                  <button class="swatch" type="button" data-accent="" style="background:#6366f1" aria-label="靛蓝" title="靛蓝"></button>
-                  <button class="swatch" type="button" data-accent="#8b5cf6" style="background:#8b5cf6" aria-label="紫色" title="紫色"></button>
-                  <button class="swatch" type="button" data-accent="#ec4899" style="background:#ec4899" aria-label="粉色" title="粉色"></button>
-                  <button class="swatch" type="button" data-accent="#14b8a6" style="background:#14b8a6" aria-label="青色" title="青色"></button>
-                  <button class="swatch" type="button" data-accent="#f97316" style="background:#f97316" aria-label="橙色" title="橙色"></button>
-                  <button class="swatch" type="button" data-accent="#64748b" style="background:#64748b" aria-label="灰蓝" title="灰蓝"></button>
-                  <label class="swatch custom" aria-label="自定义" title="自定义">+<input type="color" id="accent-custom-input" value="#6366f1"></label>
-                </div>
-              </div>
-
-              <div class="theme-section">
-                <div class="action-row">
-                  <button id="theme-reset" class="btn btn-ghost btn-sm" type="button">恢复默认主题</button>
-                </div>
-              </div>
-            </div>
-          </article>
         </section>
       </div>
     </main>
@@ -540,6 +564,41 @@
         <button id="modal-confirm" class="btn btn-primary">添加</button>
       </div>
     </div>
+  </div>
+
+  <!-- GitHub plugin install modal -->
+  <div id="github-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="github-modal-title">
+    <form id="github-install-form" class="modal-card panel github-install-card">
+      <div class="modal-head">
+        <div>
+          <h2 id="github-modal-title">从 GitHub 安装插件</h2>
+          <p class="muted">依赖将写入项目并由宿主机 Agent 构建、验证和自动回滚。</p>
+        </div>
+        <button id="github-modal-close" class="icon-btn close-btn" type="button" aria-label="关闭"></button>
+      </div>
+      <label class="field">
+        <span>GitHub 仓库地址</span>
+        <input id="github-repository-url" type="url" required autocomplete="off"
+               placeholder="https://github.com/MimoKit/nonebot-plugin-parser">
+      </label>
+      <details class="github-advanced">
+        <summary>高级选项（通常无需填写）</summary>
+        <label class="field">
+          <span>Python 包名</span>
+          <input id="github-project-name" autocomplete="off" placeholder="自动使用仓库名">
+        </label>
+        <label class="field">
+          <span>NoneBot 插件导入名</span>
+          <input id="github-module-name" autocomplete="off" placeholder="自动将 - 转换为 _">
+        </label>
+      </details>
+      <p id="github-install-hint" class="muted github-install-hint"></p>
+      <p id="github-modal-error" class="form-error"></p>
+      <div class="modal-actions">
+        <button id="github-modal-cancel" class="btn btn-ghost" type="button">取消</button>
+        <button id="github-modal-confirm" class="btn btn-primary" type="submit">安装并部署</button>
+      </div>
+    </form>
   </div>
 
   <!-- Plugin detail modal -->
@@ -567,6 +626,6 @@
   </div>
 
   <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
-  <script src="./assets/app.js?v=1.0.0" defer></script>
+  <script src="./assets/app.js?v=1.3.8" defer></script>
 </body>
 </html>
