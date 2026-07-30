@@ -15,6 +15,8 @@ from typing import Any
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
 SPECIAL_RE = re.compile(r"[^A-Za-z0-9]")
+SESSION_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+MAX_SESSIONS = 32
 
 
 class AuthError(ValueError):
@@ -60,9 +62,9 @@ class AuthStore:
         self.path = path
         self.session_seconds = session_hours * 3600
         self._lock = RLock()
-        self._sessions: dict[str, Session] = {}
         self._setup_token = ""
         self._data = self._read()
+        self._sessions = self._read_sessions()
 
     def _read(self) -> dict[str, Any]:
         if not self.path.is_file():
@@ -83,6 +85,48 @@ class AuthStore:
         with suppress(OSError):
             os.chmod(temp, 0o600)
         temp.replace(self.path)
+
+    def _read_sessions(self) -> dict[str, Session]:
+        if not self.configured:
+            return {}
+        raw = self._data.get("sessions")
+        if not isinstance(raw, dict):
+            return {}
+        now = time.time()
+        sessions: dict[str, Session] = {}
+        for digest, value in raw.items():
+            if (
+                not isinstance(digest, str)
+                or not SESSION_DIGEST_RE.fullmatch(digest)
+                or not isinstance(value, dict)
+            ):
+                continue
+            username = value.get("username")
+            expires_at = value.get("expires_at")
+            if (
+                not isinstance(username, str)
+                or username != self.username
+                or not isinstance(expires_at, (int, float))
+                or expires_at <= now
+            ):
+                continue
+            sessions[digest] = Session(username=username, expires_at=float(expires_at))
+            if len(sessions) >= MAX_SESSIONS:
+                break
+        return sessions
+
+    def _persist_sessions(self) -> None:
+        if self._sessions:
+            self._data["sessions"] = {
+                digest: {
+                    "username": session.username,
+                    "expires_at": session.expires_at,
+                }
+                for digest, session in self._sessions.items()
+            }
+        else:
+            self._data.pop("sessions", None)
+        self._write()
 
     @property
     def configured(self) -> bool:
@@ -125,23 +169,39 @@ class AuthStore:
         with self._lock:
             if not self.configured:
                 raise AuthError("控制台还没有初始化")
-            if not hmac.compare_digest(username, self.username):
-                raise AuthError("用户名或密码错误")
+            # Compare on bytes: hmac.compare_digest raises TypeError for non-ASCII
+            # str operands, and the username field is not charset-restricted.
+            username_ok = hmac.compare_digest(
+                username.encode("utf-8"),
+                self.username.encode("utf-8"),
+            )
             try:
                 salt = bytes.fromhex(str(self._data["password_salt"]))
-                actual = _password_hash(password, salt)
+                expected = str(self._data["password_hash"])
             except (KeyError, ValueError):
                 raise AuthError("管理员凭据损坏，请删除 auth.json 后重新初始化") from None
-            if not hmac.compare_digest(actual, str(self._data["password_hash"])):
+            # Always run scrypt, even on a username miss, so the response time does
+            # not reveal whether the admin username was guessed correctly.
+            actual = _password_hash(password, salt)
+            password_ok = hmac.compare_digest(actual, expected)
+            if not (username_ok and password_ok):
                 raise AuthError("用户名或密码错误")
             return self._new_session(username)
 
     def _new_session(self, username: str) -> str:
+        now = time.time()
+        self._sessions = {
+            key: value for key, value in self._sessions.items() if value.expires_at > now
+        }
+        if len(self._sessions) >= MAX_SESSIONS:
+            oldest = min(self._sessions, key=lambda key: self._sessions[key].expires_at)
+            self._sessions.pop(oldest, None)
         raw = secrets.token_urlsafe(32)
         self._sessions[_digest(raw)] = Session(
             username=username,
-            expires_at=time.time() + self.session_seconds,
+            expires_at=now + self.session_seconds,
         )
+        self._persist_sessions()
         return raw
 
     def verify(self, token: str) -> Session | None:
@@ -152,8 +212,14 @@ class AuthStore:
             expired = [key for key, value in self._sessions.items() if value.expires_at <= now]
             for key in expired:
                 self._sessions.pop(key, None)
+            # Deliberately skip persisting here: verify() runs on the event loop
+            # for every authenticated request, and a disk write on that hot path
+            # would block it. Pruned entries are gone from memory (so they can no
+            # longer authenticate) and are flushed to disk on the next
+            # login/logout; they are also filtered out again on the next load.
             return self._sessions.get(_digest(token))
 
     def logout(self, token: str) -> None:
         with self._lock:
-            self._sessions.pop(_digest(token), None)
+            if self._sessions.pop(_digest(token), None) is not None:
+                self._persist_sessions()

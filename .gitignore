@@ -158,6 +158,7 @@ cython_debug/
 
 # ruff
 .ruff_cache/
+.uv-cache/
 
 # LSP config files
 pyrightconfig.json

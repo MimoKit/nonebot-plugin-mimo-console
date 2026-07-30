@@ -3,24 +3,29 @@ from __future__ import annotations
 import asyncio
 import importlib
 import importlib.metadata
-import importlib.util
-import os
 import re
 import shutil
-import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 
+from .backends.base import PackageAction, PackageBackend, PackageRequest
+from .backends.local import LocalPackageBackend
+from .backends.local import build_nb_command as _build_nb_command
+from .backends.local import clean_output as _local_clean_output
+
 REGISTRY_URL = "https://registry.nonebot.dev/plugins.json"
 STORE_URL = "https://nonebot.dev/store/plugins"
+SELF_UPDATE_REPOSITORY = "https://github.com/MimoKit/nonebot-plugin-mimo-console.git"
 SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+SAFE_MODULE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,127}$")
+OPERATION_ID_RE = re.compile(r"^(?:op_|local-)[0-9a-f]{32}$")
 GITHUB_OWNER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}$")
+GITHUB_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 GITHUB_RESERVED_PATHS = {
     "collections",
     "features",
@@ -33,7 +38,6 @@ GITHUB_RESERVED_PATHS = {
     "sponsors",
     "topics",
 }
-PackageAction = Literal["install", "update", "uninstall"]
 
 
 class StoreError(RuntimeError):
@@ -42,6 +46,55 @@ class StoreError(RuntimeError):
 
 def normalize_project_name(value: str) -> str:
     return re.sub(r"[-_.]+", "-", value).lower()
+
+
+def parse_github_repository(
+    repository_url: str,
+    module_name: str = "",
+    project_name: str = "",
+) -> tuple[str, str, str]:
+    try:
+        parsed = urlparse(repository_url.strip())
+        port = parsed.port
+    except ValueError as exc:
+        raise StoreError("GitHub 仓库地址不合法") from exc
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname not in {"github.com", "www.github.com"}
+        or port is not None
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise StoreError("只支持不含凭据、参数或片段的 GitHub HTTPS 仓库地址")
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) != 2:
+        raise StoreError("GitHub 地址必须指向仓库根目录")
+    owner, repository = parts
+    if repository.endswith(".git"):
+        repository = repository[:-4]
+    if (
+        owner.casefold() in GITHUB_RESERVED_PATHS
+        or not GITHUB_OWNER_RE.fullmatch(owner)
+        or not GITHUB_REPOSITORY_RE.fullmatch(repository)
+        or repository in {".", ".."}
+    ):
+        raise StoreError("GitHub 仓库所有者或仓库名不合法")
+
+    resolved_project = project_name.strip() or repository
+    resolved_module = module_name.strip() or re.sub(r"[-.]+", "_", repository)
+    if not SAFE_NAME_RE.fullmatch(resolved_project):
+        raise StoreError("Python 包名不合法")
+    if not SAFE_MODULE_RE.fullmatch(resolved_module):
+        raise StoreError("插件导入名不合法")
+    if resolved_module == "nonebot_plugin_mimo_console":
+        raise StoreError("不能通过 GitHub 安装覆盖 Mimo Console 自身")
+    return (
+        f"https://github.com/{owner}/{repository}.git",
+        resolved_module,
+        resolved_project,
+    )
 
 
 def github_avatar_url(homepage: object) -> str:
@@ -68,23 +121,7 @@ def build_nb_command(
     action: PackageAction,
     project_name: str,
 ) -> list[str]:
-    if action not in {"install", "update", "uninstall"}:
-        raise ValueError("不支持的软件包操作")
-    if not SAFE_NAME_RE.fullmatch(project_name):
-        raise ValueError("插件包名不合法")
-    return [
-        sys.executable,
-        "-m",
-        "nb_cli",
-        "--cwd",
-        str(project_root),
-        "--python",
-        sys.executable,
-        "--no-venv",
-        "plugin",
-        action,
-        project_name,
-    ]
+    return _build_nb_command(project_root, action, project_name)
 
 
 def _find_uv_executable() -> str:
@@ -140,15 +177,17 @@ def _installed_distributions() -> dict[str, str]:
 
 
 def _clean_output(raw: bytes, limit: int = 6000) -> str:
-    text = raw.decode("utf-8", errors="replace")
-    text = ANSI_RE.sub("", text).replace("\r\n", "\n").strip()
-    text = re.sub(r"(https?://)[^/@\s]+@", r"\1***@", text)
-    return text[-limit:]
+    return _local_clean_output(raw, limit)
 
 
 class PluginStore:
-    def __init__(self, cache_seconds: int = 600) -> None:
+    def __init__(
+        self,
+        cache_seconds: int = 600,
+        backend: PackageBackend | None = None,
+    ) -> None:
         self.cache_seconds = cache_seconds
+        self.backend = backend or LocalPackageBackend()
         self._items: list[dict[str, Any]] = []
         self._fetched_at = 0.0
         self._fetch_lock = asyncio.Lock()
@@ -323,40 +362,192 @@ class PluginStore:
         plugin = await self.find(module_name)
         if action != "uninstall" and not plugin.get("valid", False):
             raise StoreError("该插件未通过商店检查，不能直接安装")
-        if importlib.util.find_spec("nb_cli") is None:
-            raise StoreError("当前环境缺少 nb-cli，请重新安装本插件后再试")
         project_name = str(plugin["project_link"])
-        command = build_nb_command(project_root, action, project_name)
-        env = os.environ.copy()
-        env.update({"NO_COLOR": "1", "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
-        kwargs: dict[str, Any] = {}
-        if os.name == "nt":
-            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
         async with self.action_lock:
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                cwd=project_root,
-                env=env,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                **kwargs,
-            )
             try:
-                output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
-            except asyncio.TimeoutError:
-                process.kill()
-                await process.wait()
-                raise StoreError(f"插件操作超过 {timeout} 秒，已终止") from None
-        clean_output = _clean_output(output)
-        if process.returncode != 0:
-            raise StoreError(clean_output or f"nb-cli 执行失败（{process.returncode}）")
+                operation = await self.backend.manage(
+                    PackageRequest(
+                        action=action,
+                        module_name=module_name,
+                        project_name=project_name,
+                        project_root=project_root,
+                    ),
+                    timeout,
+                )
+            except (OSError, ValueError, RuntimeError) as exc:
+                raise StoreError(str(exc)) from exc
+        if operation.status == "failed":
+            raise StoreError(operation.error or operation.output or "插件操作失败")
         importlib.invalidate_caches()
-        return {
-            "ok": True,
-            "action": action,
-            "module_name": module_name,
-            "project_link": project_name,
-            "restart_required": True,
-            "output": clean_output,
-        }
+        result = operation.as_dict()
+        result["project_link"] = operation.project_name
+        return result
+
+    async def update_self(
+        self,
+        project_root: Path,
+        repository_url: str,
+        timeout: int,
+    ) -> dict[str, Any]:
+        canonical_url = repository_url.strip()
+        if canonical_url != SELF_UPDATE_REPOSITORY:
+            raise StoreError("控制台自更新仓库不在受信任白名单中")
+        async with self.action_lock:
+            try:
+                operation = await self.backend.manage(
+                    PackageRequest(
+                        action="update",
+                        module_name="nonebot_plugin_mimo_console",
+                        project_name="nonebot-plugin-mimo-console",
+                        project_root=project_root,
+                        repository_url=canonical_url,
+                    ),
+                    timeout,
+                )
+            except (OSError, ValueError, RuntimeError) as exc:
+                raise StoreError(str(exc)) from exc
+        if operation.status == "failed":
+            raise StoreError(operation.error or operation.output or "控制台更新失败")
+        result = operation.as_dict()
+        result["project_link"] = operation.project_name
+        result["repository_url"] = canonical_url
+        return result
+
+    async def install_github(
+        self,
+        project_root: Path,
+        repository_url: str,
+        module_name: str,
+        project_name: str,
+        timeout: int,
+    ) -> dict[str, Any]:
+        canonical_url, resolved_module, resolved_project = parse_github_repository(
+            repository_url,
+            module_name,
+            project_name,
+        )
+        async with self.action_lock:
+            try:
+                operation = await self.backend.manage(
+                    PackageRequest(
+                        action="install",
+                        module_name=resolved_module,
+                        project_name=resolved_project,
+                        project_root=project_root,
+                        repository_url=canonical_url,
+                    ),
+                    timeout,
+                )
+            except (OSError, ValueError, RuntimeError) as exc:
+                raise StoreError(str(exc)) from exc
+        if operation.status == "failed":
+            raise StoreError(operation.error or operation.output or "GitHub 插件安装失败")
+        result = operation.as_dict()
+        result["project_link"] = operation.project_name
+        result["repository_url"] = canonical_url
+        return result
+
+    async def manage_direct_plugin(
+        self,
+        project_root: Path,
+        module_name: str,
+        project_name: str,
+        repository_url: str,
+        action: PackageAction,
+        timeout: int,
+    ) -> dict[str, Any]:
+        if action not in {"update", "uninstall"}:
+            raise StoreError("源码插件只支持更新或卸载")
+        if not SAFE_MODULE_RE.fullmatch(module_name) or not SAFE_NAME_RE.fullmatch(project_name):
+            raise StoreError("源码插件记录不合法")
+        canonical_url, resolved_module, resolved_project = parse_github_repository(
+            repository_url,
+            module_name,
+            project_name,
+        )
+        if resolved_module != module_name or resolved_project != project_name:
+            raise StoreError("源码插件记录与 GitHub 仓库信息不一致")
+        async with self.action_lock:
+            try:
+                operation = await self.backend.manage(
+                    PackageRequest(
+                        action=action,
+                        module_name=module_name,
+                        project_name=project_name,
+                        project_root=project_root,
+                        repository_url=canonical_url,
+                    ),
+                    timeout,
+                )
+            except (OSError, ValueError, RuntimeError) as exc:
+                raise StoreError(str(exc)) from exc
+        if operation.status == "failed":
+            raise StoreError(operation.error or operation.output or "源码插件操作失败")
+        result = operation.as_dict()
+        result["project_link"] = operation.project_name
+        return result
+
+    async def manage_dependency(
+        self,
+        project_root: Path,
+        project_name: str,
+        action: PackageAction,
+        timeout: int,
+    ) -> dict[str, Any]:
+        name = project_name.strip()
+        if not SAFE_NAME_RE.fullmatch(name):
+            raise StoreError("依赖包名不合法")
+        async with self.action_lock:
+            try:
+                operation = await self.backend.manage(
+                    PackageRequest(
+                        action=action,
+                        module_name="",
+                        project_name=name,
+                        project_root=project_root,
+                    ),
+                    timeout,
+                )
+            except (OSError, ValueError, RuntimeError) as exc:
+                raise StoreError(str(exc)) from exc
+        if operation.status == "failed":
+            raise StoreError(operation.error or operation.output or "依赖操作失败")
+        result = operation.as_dict()
+        result["project_link"] = operation.project_name
+        return result
+
+    async def capabilities(self) -> dict[str, Any]:
+        try:
+            return await self.backend.capabilities()
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise StoreError(str(exc)) from exc
+
+    async def get_operation(self, operation_id: str) -> dict[str, Any] | None:
+        if not OPERATION_ID_RE.fullmatch(operation_id):
+            raise StoreError("操作 ID 不合法")
+        try:
+            operation = await self.backend.get_operation(operation_id)
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise StoreError(str(exc)) from exc
+        return operation.as_dict() if operation else None
+
+    async def list_operations(self) -> list[dict[str, Any]]:
+        try:
+            operations = await self.backend.list_operations()
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise StoreError(str(exc)) from exc
+        return [operation.as_dict() for operation in operations]
+
+    async def rollback(self, operation_id: str) -> dict[str, Any]:
+        if not OPERATION_ID_RE.fullmatch(operation_id):
+            raise StoreError("操作 ID 不合法")
+        try:
+            return (await self.backend.rollback(operation_id)).as_dict()
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise StoreError(str(exc)) from exc
+
+    async def restart(self) -> dict[str, Any]:
+        try:
+            return (await self.backend.restart()).as_dict()
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise StoreError(str(exc)) from exc

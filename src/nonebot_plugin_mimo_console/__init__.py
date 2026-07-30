@@ -12,8 +12,14 @@ from nonebot.permission import SUPERUSER
 from nonebot.plugin import PluginMetadata
 
 from .api import create_router
+from .backends import (
+    DockerAgentBackend,
+    LocalConfigurationBackend,
+    LocalPackageBackend,
+)
 from .background import BackgroundStore
 from .config import ConsoleConfig
+from .deployment import detect_deployment
 from .disabled import DisabledStore
 from .log_buffer import LogBuffer
 from .security import AuthStore
@@ -36,6 +42,19 @@ __plugin_meta__ = PluginMetadata(
 
 
 console_config = get_plugin_config(ConsoleConfig)
+project_root = console_config.project_root()
+backup_dir = localstore.get_plugin_data_dir() / "backups"
+deployment = detect_deployment(console_config)
+if deployment.backend_mode == "docker-agent":
+    package_backend = DockerAgentBackend(
+        socket_path=console_config.mimo_console_agent_socket,
+        token_file=console_config.mimo_console_agent_token_file,
+        instance_id=console_config.mimo_console_instance_id,
+    )
+    configuration_backend = package_backend
+else:
+    package_backend = LocalPackageBackend(deployment_mode=deployment.mode)
+    configuration_backend = LocalConfigurationBackend(project_root, backup_dir)
 static_dir = Path(__file__).parent / "static"
 console_path = console_config.mimo_console_path
 auth = AuthStore(
@@ -44,6 +63,7 @@ auth = AuthStore(
 )
 console_state = ConsoleState(
     config=console_config,
+    deployment=deployment,
     auth=auth,
     logs=LogBuffer(
         ignored_fragments=(
@@ -52,8 +72,11 @@ console_state = ConsoleState(
         )
     ),
     static_dir=static_dir,
-    backup_dir=localstore.get_plugin_data_dir() / "backups",
-    store=PluginStore(console_config.mimo_console_store_cache_seconds),
+    configuration=configuration_backend,
+    store=PluginStore(
+        console_config.mimo_console_store_cache_seconds,
+        backend=package_backend,
+    ),
     background=BackgroundStore(
         data_file=localstore.get_plugin_data_file("background.json"),
         image_dir=localstore.get_plugin_data_dir() / "backgrounds",

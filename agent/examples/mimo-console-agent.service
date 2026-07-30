@@ -1,0 +1,29 @@
+[Unit]
+Description=Mimo Console Docker deployment agent
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/nonebot-plugin-mimo-console/agent
+Environment=DOCKER_CONFIG=/var/lib/mimo-console-agent/docker-config
+ExecStart=/opt/nonebot-plugin-mimo-console/agent/.venv/bin/mimo-console-agent --config /etc/mimo-console-agent/agent.json
+Restart=on-failure
+RestartSec=3
+RuntimeDirectory=mimo-agent
+RuntimeDirectoryMode=0750
+StateDirectory=mimo-console-agent
+StateDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/run /var/lib/mimo-console-agent /srv/nonebot-personal
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

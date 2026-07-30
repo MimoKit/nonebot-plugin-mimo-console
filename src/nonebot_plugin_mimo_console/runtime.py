@@ -181,9 +181,17 @@ def dashboard_snapshot(project_root: Path) -> dict[str, Any]:
 
 def plugin_snapshot() -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
+    package_map = importlib.metadata.packages_distributions()
     for plugin in sorted(get_loaded_plugins(), key=lambda item: item.name.casefold()):
         metadata = plugin.metadata
         module_file = getattr(plugin.module, "__file__", None)
+        config_model = getattr(metadata, "config", None)
+        model_fields = getattr(config_model, "model_fields", {}) or {}
+        config_keys = [
+            str(getattr(field, "alias", None) or name).upper()
+            for name, field in model_fields.items()
+        ]
+        distributions = package_map.get(plugin.module_name.split(".", 1)[0], [])
         result.append(
             {
                 "name": plugin.name,
@@ -196,6 +204,8 @@ def plugin_snapshot() -> list[dict[str, Any]]:
                 "icon": _plugin_icon(metadata, module_file),
                 "matchers": len(getattr(plugin, "matcher", ())),
                 "path": str(Path(module_file).parent) if module_file else "",
+                "config_keys": sorted(set(config_keys)),
+                "distribution": distributions[0] if distributions else "",
             }
         )
     return result

@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = ROOT / "src" / "nonebot_plugin_mimo_console" / "store.py"
-spec = importlib.util.spec_from_file_location("mimo_console_store_test", MODULE_PATH)
+PACKAGE_PATH = ROOT / "src" / "nonebot_plugin_mimo_console"
+MODULE_PATH = PACKAGE_PATH / "store.py"
+package = types.ModuleType("nonebot_plugin_mimo_console")
+package.__path__ = [str(PACKAGE_PATH)]  # type: ignore[attr-defined]
+sys.modules.setdefault("nonebot_plugin_mimo_console", package)
+spec = importlib.util.spec_from_file_location("nonebot_plugin_mimo_console.store", MODULE_PATH)
 if spec is None or spec.loader is None:
     raise RuntimeError("cannot load store module")
 store = importlib.util.module_from_spec(spec)
@@ -113,6 +120,38 @@ class StoreTests(unittest.TestCase):
         )
         self.assertEqual(store.github_avatar_url("https://example.com/project"), "")
 
+    def test_parses_github_repository_and_derives_names(self) -> None:
+        url, module_name, project_name = store.parse_github_repository(
+            "https://github.com/MimoKit/nonebot-plugin-parser"
+        )
+        self.assertEqual(
+            url,
+            "https://github.com/MimoKit/nonebot-plugin-parser.git",
+        )
+        self.assertEqual(module_name, "nonebot_plugin_parser")
+        self.assertEqual(project_name, "nonebot-plugin-parser")
+
+    def test_github_repository_allows_explicit_names(self) -> None:
+        _, module_name, project_name = store.parse_github_repository(
+            "https://github.com/example/custom.git",
+            "nonebot_plugin_custom",
+            "nonebot-plugin-custom",
+        )
+        self.assertEqual(module_name, "nonebot_plugin_custom")
+        self.assertEqual(project_name, "nonebot-plugin-custom")
+
+    def test_rejects_unsafe_github_repository_urls(self) -> None:
+        values = (
+            "http://github.com/MimoKit/plugin",
+            "https://user:secret@github.com/MimoKit/plugin",
+            "https://github.com/MimoKit/plugin/tree/main",
+            "https://github.com/MimoKit/plugin?ref=main",
+            "https://example.com/MimoKit/plugin",
+        )
+        for value in values:
+            with self.subTest(value=value), self.assertRaises(store.StoreError):
+                store.parse_github_repository(value)
+
     def test_serialized_store_plugin_contains_icon(self) -> None:
         raw = {
             "module_name": "nonebot_plugin_status",
@@ -122,6 +161,76 @@ class StoreTests(unittest.TestCase):
         }
         item = store.PluginStore()._serialize_plugin(raw)
         self.assertEqual(item["icon"], "https://github.com/nonebot.png?size=96")
+
+    def test_direct_source_action_preserves_repository_url(self) -> None:
+        class Backend:
+            request: Any = None
+
+            async def manage(self, request, timeout):
+                del timeout
+                self.request = request
+                return types.SimpleNamespace(
+                    status="succeeded",
+                    error="",
+                    output="",
+                    project_name=request.project_name,
+                    as_dict=lambda: {"status": "succeeded"},
+                )
+
+        backend = Backend()
+        plugin_store = store.PluginStore(backend=backend)
+        result = asyncio.run(
+            plugin_store.manage_direct_plugin(
+                Path("."),
+                "nonebot_plugin_demo",
+                "nonebot-plugin-demo",
+                "https://github.com/example/demo",
+                "update",
+                30,
+            )
+        )
+        self.assertEqual(result["status"], "succeeded")
+        request = backend.request
+        assert request is not None
+        self.assertEqual(
+            request.repository_url,
+            "https://github.com/example/demo.git",
+        )
+
+    def test_self_update_bypasses_registry_and_preserves_trusted_repository(self) -> None:
+        class Backend:
+            request: Any = None
+
+            async def manage(self, request, timeout):
+                del timeout
+                self.request = request
+                return types.SimpleNamespace(
+                    status="queued",
+                    error="",
+                    output="",
+                    project_name=request.project_name,
+                    as_dict=lambda: {"status": "queued"},
+                )
+
+        backend = Backend()
+        plugin_store = store.PluginStore(backend=backend)
+        result = asyncio.run(
+            plugin_store.update_self(
+                Path("."),
+                "https://github.com/MimoKit/nonebot-plugin-mimo-console.git",
+                30,
+            )
+        )
+        self.assertEqual(result["status"], "queued")
+        request = backend.request
+        assert request is not None
+        self.assertEqual(request.action, "update")
+        self.assertEqual(request.module_name, "nonebot_plugin_mimo_console")
+        self.assertEqual(request.project_name, "nonebot-plugin-mimo-console")
+        self.assertEqual(
+            request.repository_url,
+            "https://github.com/MimoKit/nonebot-plugin-mimo-console.git",
+        )
 
 
 if __name__ == "__main__":

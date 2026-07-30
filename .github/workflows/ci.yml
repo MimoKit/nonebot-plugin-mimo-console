@@ -10,6 +10,9 @@ on:
       - "tests/**"
       - "uv.lock"
       - "pyproject.toml"
+      - "agent/**"
+      - "docs/**"
+      - "README.md"
       - ".github/workflows/**"
 
 jobs:
@@ -24,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: crate-ci/typos@master
+      - uses: crate-ci/typos@v1.48.0
 
   basedpyright:
     name: BasedPyright
@@ -98,6 +101,28 @@ jobs:
         with:
           env_vars: PYTHON
           use_oidc: true
+
+  agent:
+    name: Docker Agent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.12"
+          version: latest
+
+      - name: Install Agent
+        run: uv sync --project agent --locked
+
+      - name: Test Agent
+        run: uv run --project agent python -m unittest discover -s agent/tests -v
+
+      - name: Build Agent
+        run: uv build --project agent
 
   package:
     name: Package

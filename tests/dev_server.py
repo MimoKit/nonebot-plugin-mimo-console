@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -12,9 +13,10 @@ import nonebot  # noqa: E402
 
 nonebot.init(
     driver="~fastapi",
-    host="127.0.0.1",
-    port=18794,
+    host=os.environ.get("MIMO_DEV_HOST", "127.0.0.1"),
+    port=int(os.environ.get("MIMO_DEV_PORT", "18794")),
     mimo_console_project_root=ROOT,
+    localstore_use_cwd=True,
 )
 nonebot.load_plugin("nonebot_plugin_mimo_console")
 
