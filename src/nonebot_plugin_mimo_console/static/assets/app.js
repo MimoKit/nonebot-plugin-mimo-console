@@ -25,6 +25,7 @@ const state = {
   logs: [],
   logAfter: 0,
   logFollow: true,
+  logLevel: "ALL",
   timers: [],
   detailPlugin: null,
   detailSource: null,
@@ -177,7 +178,7 @@ function bindEvents() {
   $("#dependency-install-form").addEventListener("submit", installDependency);
   $("#config-search").addEventListener("input", renderConfig);
   $("#log-search").addEventListener("input", renderLogs);
-  $("#log-level").addEventListener("change", renderLogs);
+  bindLogLevelSelect();
   $("#log-follow").addEventListener("click", () => {
     state.logFollow = !state.logFollow;
     $("#log-follow").classList.toggle("active", state.logFollow);
@@ -1453,9 +1454,76 @@ function renderRecentLogs() {
     : '<div class="empty-text">正在等待日志…</div>';
 }
 
+function setLogLevelSelectOpen(open, focusOption = false) {
+  const root = $("#log-level-select");
+  const trigger = $("#log-level-trigger");
+  const menu = $("#log-level-menu");
+  root.classList.toggle("open", open);
+  menu.classList.toggle("hidden", !open);
+  trigger.setAttribute("aria-expanded", String(open));
+  if (open && focusOption) {
+    const selected = $('.custom-select-option[aria-selected="true"]', menu);
+    (selected || $(".custom-select-option", menu))?.focus();
+  }
+}
+
+function selectLogLevel(value, { focusTrigger = true } = {}) {
+  const option = $(`.custom-select-option[data-value="${CSS.escape(value)}"]`, $("#log-level-menu"));
+  if (!option) return;
+  state.logLevel = value;
+  $("#log-level-label").textContent = option.textContent.trim();
+  $$(".custom-select-option", $("#log-level-menu")).forEach((item) => {
+    const active = item === option;
+    item.classList.toggle("active", active);
+    item.setAttribute("aria-selected", String(active));
+  });
+  setLogLevelSelectOpen(false);
+  if (focusTrigger) $("#log-level-trigger").focus();
+  renderLogs();
+}
+
+function bindLogLevelSelect() {
+  const root = $("#log-level-select");
+  const trigger = $("#log-level-trigger");
+  const menu = $("#log-level-menu");
+  const options = $$(".custom-select-option", menu);
+
+  trigger.addEventListener("click", () => {
+    setLogLevelSelectOpen(!root.classList.contains("open"), true);
+  });
+  trigger.addEventListener("keydown", (event) => {
+    if (!["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    setLogLevelSelectOpen(true, true);
+  });
+  options.forEach((option) => {
+    option.addEventListener("click", () => selectLogLevel(option.dataset.value));
+    option.addEventListener("keydown", (event) => {
+      const index = options.indexOf(option);
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const offset = event.key === "ArrowDown" ? 1 : -1;
+        options[(index + offset + options.length) % options.length].focus();
+      } else if (event.key === "Home" || event.key === "End") {
+        event.preventDefault();
+        options[event.key === "Home" ? 0 : options.length - 1].focus();
+      } else if (event.key === "Escape" || event.key === "Tab") {
+        setLogLevelSelectOpen(false);
+        if (event.key === "Escape") {
+          event.preventDefault();
+          trigger.focus();
+        }
+      }
+    });
+  });
+  document.addEventListener("click", (event) => {
+    if (!root.contains(event.target)) setLogLevelSelectOpen(false);
+  });
+}
+
 function renderLogs() {
   const query = $("#log-search").value.trim().toLowerCase();
-  const level = $("#log-level").value;
+  const level = state.logLevel;
   const items = state.logs.filter((item) =>
     (level === "ALL" || item.level === level)
     && [item.message, item.module].join(" ").toLowerCase().includes(query),
