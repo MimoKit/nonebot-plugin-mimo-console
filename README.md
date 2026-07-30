@@ -130,15 +130,13 @@ uv build
 
 ## Star History
 
-<div align="center">
-  <a href="https://www.star-history.com/?repos=MimoKit%2Fnonebot-plugin-mimo-console&type=date&legend=top-left">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=MimoKit/nonebot-plugin-mimo-console&type=Date&theme=dark&legend=top-left">
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=MimoKit/nonebot-plugin-mimo-console&type=Date&legend=top-left">
-      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=MimoKit/nonebot-plugin-mimo-console&type=Date&legend=top-left">
-    </picture>
-  </a>
-</div>
+<a href="https://www.star-history.com/?repos=MimoKit%2Fnonebot-plugin-mimo-console&type=date&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=MimoKit/nonebot-plugin-mimo-console&type=date&theme=dark&legend=top-left&sealed_token=-bjt_4uN1J4aHMp_QpaH2dudBeu4QV__C6sShEVMLwHmx5ar_wMeEy4wgQZ0kqGBu9ZzSlNLKeDyTxrfM_Ad06Rj9G1YdjxJuCrodSIcfQI915neDBCvSkWA9nKssmLBoG2YlcBlE5zd9Ep-DMF7es9rx3cQBaGkRDFfYb6jk_tmCxUWfwVANLS8BUEM">
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=MimoKit/nonebot-plugin-mimo-console&type=date&legend=top-left&sealed_token=-bjt_4uN1J4aHMp_QpaH2dudBeu4QV__C6sShEVMLwHmx5ar_wMeEy4wgQZ0kqGBu9ZzSlNLKeDyTxrfM_Ad06Rj9G1YdjxJuCrodSIcfQI915neDBCvSkWA9nKssmLBoG2YlcBlE5zd9Ep-DMF7es9rx3cQBaGkRDFfYb6jk_tmCxUWfwVANLS8BUEM">
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=MimoKit/nonebot-plugin-mimo-console&type=date&legend=top-left&sealed_token=-bjt_4uN1J4aHMp_QpaH2dudBeu4QV__C6sShEVMLwHmx5ar_wMeEy4wgQZ0kqGBu9ZzSlNLKeDyTxrfM_Ad06Rj9G1YdjxJuCrodSIcfQI915neDBCvSkWA9nKssmLBoG2YlcBlE5zd9Ep-DMF7es9rx3cQBaGkRDFfYb6jk_tmCxUWfwVANLS8BUEM">
+  </picture>
+</a>
 
 ## 致谢
 
