@@ -45,6 +45,19 @@ class PackageTests(unittest.TestCase):
         self.assertIn('.proxy-latency[data-status="timeout"]', styles)
         self.assertIn('"status": "timeout"', api)
 
+    def test_log_level_filter_uses_custom_select(self) -> None:
+        static = ROOT / "src" / "nonebot_plugin_mimo_console" / "static"
+        index = (static / "index.html").read_text(encoding="utf-8")
+        script = (static / "assets" / "app.js").read_text(encoding="utf-8")
+        styles = (static / "assets" / "styles.css").read_text(encoding="utf-8")
+        self.assertNotIn('id="log-level" class="select"', index)
+        self.assertIn('id="log-level-trigger"', index)
+        self.assertIn('role="listbox"', index)
+        self.assertIn("function bindLogLevelSelect()", script)
+        self.assertIn("const level = state.logLevel;", script)
+        self.assertIn(".custom-select-menu", styles)
+        self.assertIn(".custom-select-option.active", styles)
+
     def test_header_version_is_populated_from_runtime_metadata(self) -> None:
         static = ROOT / "src" / "nonebot_plugin_mimo_console" / "static"
         index = (static / "index.html").read_text(encoding="utf-8")

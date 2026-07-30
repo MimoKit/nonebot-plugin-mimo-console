@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./assets/styles.css?v=1.3.9">
+  <link rel="stylesheet" href="./assets/styles.css?v=1.3.10">
 </head>
 <body>
   <div id="bg-layer" class="bg-layer"></div>
@@ -407,15 +407,28 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
               <input id="log-search" placeholder="搜索日志内容">
             </div>
-            <select id="log-level" class="select">
-              <option value="ALL">全部级别</option>
-              <option>DEBUG</option>
-              <option>INFO</option>
-              <option>SUCCESS</option>
-              <option>WARNING</option>
-              <option>ERROR</option>
-              <option>CRITICAL</option>
-            </select>
+            <div id="log-level-select" class="custom-select log-level-select">
+              <button
+                id="log-level-trigger"
+                class="custom-select-trigger"
+                type="button"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+                aria-controls="log-level-menu"
+              >
+                <span id="log-level-label">全部级别</span>
+                <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <div id="log-level-menu" class="custom-select-menu hidden" role="listbox" aria-label="日志级别">
+                <button class="custom-select-option active" type="button" role="option" aria-selected="true" data-value="ALL"><span class="level-dot ALL"></span>全部级别</button>
+                <button class="custom-select-option" type="button" role="option" aria-selected="false" data-value="DEBUG"><span class="level-dot DEBUG"></span>DEBUG</button>
+                <button class="custom-select-option" type="button" role="option" aria-selected="false" data-value="INFO"><span class="level-dot INFO"></span>INFO</button>
+                <button class="custom-select-option" type="button" role="option" aria-selected="false" data-value="SUCCESS"><span class="level-dot SUCCESS"></span>SUCCESS</button>
+                <button class="custom-select-option" type="button" role="option" aria-selected="false" data-value="WARNING"><span class="level-dot WARNING"></span>WARNING</button>
+                <button class="custom-select-option" type="button" role="option" aria-selected="false" data-value="ERROR"><span class="level-dot ERROR"></span>ERROR</button>
+                <button class="custom-select-option" type="button" role="option" aria-selected="false" data-value="CRITICAL"><span class="level-dot CRITICAL"></span>CRITICAL</button>
+              </div>
+            </div>
             <button id="log-follow" class="btn btn-secondary btn-sm active">自动滚动</button>
             <button id="clear-logs" class="btn btn-danger btn-sm">清空</button>
           </div>
@@ -626,6 +639,6 @@
   </div>
 
   <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
-  <script src="./assets/app.js?v=1.3.9" defer></script>
+  <script src="./assets/app.js?v=1.3.10" defer></script>
 </body>
 </html>
