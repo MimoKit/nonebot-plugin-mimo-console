@@ -2312,6 +2312,31 @@ a { color: inherit; text-decoration: none; }
 
 /* ===== GitHub Proxy Section ===== */
 .card > .radio-group { margin-bottom: 12px; }
+.proxy-option {
+  position: relative;
+  padding-right: 88px;
+}
+.proxy-option > div { min-width: 0; }
+.proxy-option strong {
+  overflow-wrap: anywhere;
+}
+.proxy-latency {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  line-height: 1.4;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.proxy-latency[data-status="testing"] { color: var(--accent); }
+.proxy-latency[data-status="success"] { color: var(--color-green); }
+.proxy-latency[data-status="timeout"] { color: var(--color-yellow); }
+.proxy-latency[data-status="failed"] { color: var(--color-red); }
 
 /* ===== Responsive ===== */
 @media (max-width: 1180px) {
