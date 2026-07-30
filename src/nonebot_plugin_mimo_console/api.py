@@ -1,27 +1,33 @@
 import asyncio
+import importlib.metadata
 import os
+import re
 import signal
 import subprocess
 import sys
 import time
 from collections import defaultdict, deque
-from typing import Annotated, Any, Literal
+from email.message import Message
+from typing import Annotated, Any, Literal, cast
 
 import httpx
+import tomlkit
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from nonebot import get_driver, logger
 from pydantic import BaseModel, Field
 
-from .background import MAX_BACKGROUND_BYTES, BackgroundError
-from .env_editor import locate_env_file, read_env, update_env
+from .background import MAX_BACKGROUND_BYTES, BackgroundError, download_background
+from .dependencies import dependency_snapshot
+from .readme import render_readme_html
 from .runtime import dashboard_snapshot, plugin_snapshot
 from .security import AuthError, Session
 from .state import ConsoleState
-from .store import StoreError, _clean_output, build_self_update_command
+from .store import StoreError, _clean_output, build_self_update_command, normalize_project_name
 from .version import (
     GITHUB_PROXY_PRESETS,
+    PACKAGE_GIT_URL,
     PACKAGE_NAME,
     get_installed_version,
     is_mirror_repo,
@@ -47,12 +53,22 @@ class ConfigUpdateBody(BaseModel):
     values: dict[str, str]
 
 
+class ConfigRestoreBody(BaseModel):
+    backup_id: str = Field(min_length=1, max_length=255)
+
+
 class BackgroundUrlBody(BaseModel):
     url: str = Field(min_length=1, max_length=2048)
 
 
 class PluginActionBody(BaseModel):
     action: Literal["install", "update", "uninstall"]
+
+
+class GithubInstallBody(BaseModel):
+    repository_url: str = Field(min_length=1, max_length=512)
+    module_name: str = Field(default="", max_length=128)
+    project_name: str = Field(default="", max_length=128)
 
 
 class PluginDisabledBody(BaseModel):
@@ -70,8 +86,20 @@ class AttemptLimiter:
         self.window = window
         self._attempts: dict[str, deque[float]] = defaultdict(deque)
 
+    def _evict_stale(self, now: float) -> None:
+        # Drop buckets whose attempts have all aged out so the dict cannot grow
+        # without bound when requests arrive from many rotating source IPs.
+        stale = [
+            key
+            for key, values in self._attempts.items()
+            if not values or values[-1] < now - self.window
+        ]
+        for key in stale:
+            del self._attempts[key]
+
     def check(self, key: str) -> None:
         now = time.time()
+        self._evict_stale(now)
         values = self._attempts[key]
         while values and values[0] < now - self.window:
             values.popleft()
@@ -83,13 +111,85 @@ class AttemptLimiter:
         self._attempts.pop(key, None)
 
 
+def merge_source_plugin_records(
+    items: list[dict[str, Any]],
+    source_records: dict[str, Any],
+    disabled: set[str],
+) -> list[dict[str, Any]]:
+    loaded_modules: set[str] = set()
+    for item in items:
+        module_name = str(item.get("module") or "")
+        loaded_modules.add(module_name)
+        item["loaded"] = True
+        item["disabled"] = item.get("name") in disabled
+        record = source_records.get(module_name)
+        if isinstance(record, dict):
+            item["source_project"] = str(record.get("project") or "")
+            item["source_repository"] = str(record.get("repository") or "")
+
+    for module_name, record in source_records.items():
+        module_name = str(module_name)
+        if (
+            not module_name
+            or module_name == "nonebot_plugin_mimo_console"
+            or module_name in loaded_modules
+            or not isinstance(record, dict)
+        ):
+            continue
+        project_name = str(record.get("project") or "")
+        repository = str(record.get("repository") or "")
+        items.append(
+            {
+                "name": module_name,
+                "module": module_name,
+                "title": project_name or module_name,
+                "description": "该 GitHub 源码插件已安装，但当前 NoneBot 进程未成功加载",
+                "usage": "",
+                "type": "plugin",
+                "homepage": repository,
+                "icon": "",
+                "matchers": 0,
+                "path": "",
+                "config_keys": [],
+                "distribution": project_name,
+                "loaded": False,
+                "disabled": module_name in disabled,
+                "source_project": project_name,
+                "source_repository": repository,
+            }
+        )
+    return items
+
+
 def create_router(state: ConsoleState) -> APIRouter:
     router = APIRouter()
     bearer = HTTPBearer(auto_error=False)
     limiter = AttemptLimiter()
+    background_lock = asyncio.Lock()
+
+    def source_plugin_records() -> dict[str, Any]:
+        pyproject = state.config.project_root() / "pyproject.toml"
+        if not pyproject.is_file():
+            return {}
+        try:
+            document = tomlkit.parse(pyproject.read_text(encoding="utf-8"))
+            records = document.get("tool", {}).get("mimo_console", {}).get("source_plugins", {})
+        except (OSError, ValueError, TypeError):
+            return {}
+        return dict(records) if isinstance(records, dict) else {}
 
     def client_key(request: Request) -> str:
-        return request.client.host if request.client else "unknown"
+        peer = request.client.host if request.client else "unknown"
+        hops = state.config.mimo_console_trusted_proxy_hops
+        if hops <= 0:
+            return peer
+        # Behind N trusted proxies the real client is the Nth-from-last entry of
+        # X-Forwarded-For; earlier entries are attacker-supplied and untrusted.
+        forwarded = request.headers.get("x-forwarded-for", "")
+        chain = [part.strip() for part in forwarded.split(",") if part.strip()]
+        if len(chain) >= hops:
+            return chain[-hops]
+        return peer
 
     def raw_token(
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
@@ -104,6 +204,72 @@ def create_router(state: ConsoleState) -> APIRouter:
                 detail="登录已失效，请重新登录",
             )
         return session
+
+    async def github_readme(homepage: str) -> dict[str, Any]:
+        match = re.match(r"https?://github\.com/([^/]+)/([^/?#]+)", homepage)
+        if not match:
+            return {
+                "ok": False,
+                "content": "",
+                "detail": "主页不是 GitHub 仓库，无法获取 README",
+            }
+        owner, repo = match.group(1), match.group(2).removesuffix(".git")
+        proxy = state.config.mimo_console_github_proxy
+        branches = ["main", "master"]
+        filenames = ["README.md", "readme.md", "README.rst", "README"]
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            for branch in branches:
+                for filename in filenames:
+                    if proxy and not is_mirror_repo(proxy):
+                        raw_url = (
+                            f"{proxy}https://raw.githubusercontent.com/"
+                            f"{owner}/{repo}/{branch}/{filename}"
+                        )
+                    else:
+                        raw_url = (
+                            f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{filename}"
+                        )
+                    try:
+                        response = await client.get(
+                            raw_url,
+                            headers={"User-Agent": PACKAGE_NAME},
+                        )
+                        if response.status_code == 200:
+                            return {
+                                "ok": True,
+                                "content": response.text,
+                                "content_html": render_readme_html(response.text),
+                                "detail": "",
+                                "base_url": (
+                                    f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/"
+                                ),
+                            }
+                    except (httpx.HTTPError, OSError):
+                        continue
+        return {"ok": False, "content": "", "detail": "无法获取 README 文件"}
+
+    def distribution_readme(distribution_name: str) -> tuple[str, str]:
+        if not distribution_name:
+            return "", ""
+        try:
+            metadata = cast(Message, importlib.metadata.metadata(distribution_name))
+        except importlib.metadata.PackageNotFoundError:
+            return "", ""
+        homepage = str(metadata.get("Home-page") or "").strip()
+        if not homepage:
+            for project_url in metadata.get_all("Project-URL") or []:
+                label, separator, url = project_url.partition(",")
+                if separator and label.strip().casefold() in {
+                    "homepage",
+                    "repository",
+                    "source",
+                    "source code",
+                }:
+                    homepage = url.strip()
+                    break
+        payload = metadata.get_payload()
+        content = payload.strip() if isinstance(payload, str) else ""
+        return homepage, content
 
     @router.get("/api/health")
     async def health() -> dict[str, Any]:
@@ -150,7 +316,7 @@ def create_router(state: ConsoleState) -> APIRouter:
         token: Annotated[str, Depends(raw_token)],
         session: Annotated[Session, Depends(require_session)],
     ) -> dict[str, bool]:
-        state.auth.logout(token)
+        await asyncio.to_thread(state.auth.logout, token)
         return {"ok": True}
 
     @router.get("/api/dashboard")
@@ -165,9 +331,102 @@ def create_router(state: ConsoleState) -> APIRouter:
     ) -> dict[str, Any]:
         disabled = state.disabled.names
         items = await asyncio.to_thread(plugin_snapshot)
-        for item in items:
-            item["disabled"] = item["name"] in disabled
-        return {"items": items}
+        source_records = await asyncio.to_thread(source_plugin_records)
+        return {
+            "items": merge_source_plugin_records(items, source_records, disabled),
+            "package_management": state.config.mimo_console_allow_package_management,
+        }
+
+    @router.post("/api/plugins/{plugin_name}/action")
+    async def manage_loaded_source_plugin(
+        plugin_name: str,
+        body: PluginActionBody,
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        if not state.config.mimo_console_allow_package_management:
+            raise HTTPException(status_code=403, detail="插件安装功能已在配置中关闭")
+        if body.action == "install":
+            raise HTTPException(status_code=400, detail="此接口只支持更新或卸载")
+        items = await plugins(session)
+        item = next(
+            (
+                value
+                for value in items["items"]
+                if value.get("name") == plugin_name or value.get("module") == plugin_name
+            ),
+            None,
+        )
+        records = await asyncio.to_thread(source_plugin_records)
+        module_name = (
+            plugin_name
+            if isinstance(records.get(plugin_name), dict)
+            else str((item or {}).get("module") or "")
+        )
+        if module_name == "nonebot_plugin_mimo_console":
+            raise HTTPException(status_code=400, detail="不能在控制台中管理控制台自身")
+        record = records.get(module_name)
+        if not isinstance(record, dict):
+            raise HTTPException(status_code=400, detail="该插件不是由 GitHub 源码安装")
+        project_name = str(record.get("project") or "")
+        repository = str(record.get("repository") or "")
+        if not project_name or not repository:
+            raise HTTPException(status_code=400, detail="GitHub 源码插件记录不完整")
+        if state.store.action_lock.locked():
+            raise HTTPException(status_code=409, detail="另一个插件操作仍在进行中")
+        try:
+            return await state.store.manage_direct_plugin(
+                state.config.project_root(),
+                module_name,
+                project_name,
+                repository,
+                body.action,
+                state.config.mimo_console_package_timeout,
+            )
+        except (OSError, ValueError, StoreError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get("/api/plugins/{plugin_name}/readme")
+    async def loaded_plugin_readme(
+        plugin_name: str,
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        plugins = await asyncio.to_thread(plugin_snapshot)
+        item = next(
+            (
+                plugin
+                for plugin in plugins
+                if plugin.get("name") == plugin_name or plugin.get("module") == plugin_name
+            ),
+            None,
+        )
+        if item is None:
+            records = await asyncio.to_thread(source_plugin_records)
+            record = records.get(plugin_name)
+            if isinstance(record, dict):
+                repository = str(record.get("repository") or "")
+                if repository:
+                    return await github_readme(repository)
+            raise HTTPException(status_code=404, detail="插件未加载或不存在")
+        metadata_homepage, metadata_readme = await asyncio.to_thread(
+            distribution_readme,
+            str(item.get("distribution") or ""),
+        )
+        homepage = str(item.get("homepage") or metadata_homepage).strip()
+        result: dict[str, Any] | None = None
+        if homepage:
+            result = await github_readme(homepage)
+            if result["ok"]:
+                return result
+        if metadata_readme:
+            return {
+                "ok": True,
+                "content": metadata_readme,
+                "content_html": render_readme_html(metadata_readme),
+                "detail": "",
+            }
+        if not homepage:
+            return {"ok": False, "content": "", "detail": "该插件未提供 README 或主页链接"}
+        return result or {"ok": False, "content": "", "detail": "无法获取 README 文件"}
 
     @router.put("/api/plugins/disabled")
     async def set_plugin_disabled(
@@ -190,6 +449,72 @@ def create_router(state: ConsoleState) -> APIRouter:
             "disabled": body.disabled,
             "disabled_plugins": sorted(state.disabled.names),
         }
+
+    @router.get("/api/dependencies")
+    async def dependencies(
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        plugins = await asyncio.to_thread(plugin_snapshot)
+        plugin_distributions = {
+            str(item.get("distribution") or "") for item in plugins if item.get("distribution")
+        }
+        result = await asyncio.to_thread(
+            dependency_snapshot,
+            state.config.project_root(),
+            plugin_distributions,
+        )
+        result["package_management"] = state.config.mimo_console_allow_package_management
+        result["deployment"] = state.deployment.as_dict()
+        result["deployment_mode"] = state.deployment.mode
+        return result
+
+    @router.post("/api/dependencies/{project_name}/action")
+    async def manage_dependency(
+        project_name: str,
+        body: PluginActionBody,
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        if not state.config.mimo_console_allow_package_management:
+            raise HTTPException(status_code=403, detail="依赖管理功能已在配置中关闭")
+        plugins = await asyncio.to_thread(plugin_snapshot)
+        plugin_distributions = {
+            str(item.get("distribution") or "") for item in plugins if item.get("distribution")
+        }
+        snapshot = await asyncio.to_thread(
+            dependency_snapshot,
+            state.config.project_root(),
+            plugin_distributions,
+        )
+        normalized = normalize_project_name(project_name)
+        current = next(
+            (item for item in snapshot["items"] if item["normalized_name"] == normalized),
+            None,
+        )
+        if body.action in {"update", "uninstall"}:
+            if current is None or not current["direct"]:
+                raise HTTPException(status_code=400, detail="只能更新或卸载项目直接依赖")
+            if not current["manageable"]:
+                detail = (
+                    "插件依赖请在插件中心管理"
+                    if current["kind"] == "plugin"
+                    else "该依赖是 NoneBot 或控制台运行所必需，不能在这里卸载"
+                )
+                raise HTTPException(status_code=400, detail=detail)
+        if state.store.action_lock.locked():
+            raise HTTPException(status_code=409, detail="另一个软件包操作仍在进行中")
+        try:
+            result = await state.store.manage_dependency(
+                state.config.project_root(),
+                project_name,
+                body.action,
+                state.config.mimo_console_package_timeout,
+            )
+        except (OSError, ValueError, StoreError) as exc:
+            logger.warning(f"[Mimo Console] 依赖操作失败：{body.action} {project_name}")
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        verb = "已提交" if result.get("status") == "queued" else "已完成"
+        logger.success(f"[Mimo Console] {verb}依赖操作：{body.action} {project_name}")
+        return result
 
     @router.get("/api/store/plugins")
     async def store_plugins(
@@ -248,15 +573,98 @@ def create_router(state: ConsoleState) -> APIRouter:
         except (OSError, ValueError, StoreError) as exc:
             logger.warning(f"[Mimo Console] 插件操作失败：{body.action} {module_name}")
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        logger.success(f"[Mimo Console] 已完成插件操作：{body.action} {result['project_link']}")
+        verb = "已提交" if result.get("status") == "queued" else "已完成"
+        logger.success(f"[Mimo Console] {verb}插件操作：{body.action} {result['project_link']}")
         return result
+
+    @router.post("/api/store/github/install")
+    async def install_github_plugin(
+        body: GithubInstallBody,
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        if not state.config.mimo_console_allow_package_management:
+            raise HTTPException(status_code=403, detail="插件安装功能已在配置中关闭")
+        if state.store.action_lock.locked():
+            raise HTTPException(status_code=409, detail="另一个插件操作仍在进行中")
+        try:
+            result = await state.store.install_github(
+                state.config.project_root(),
+                body.repository_url,
+                body.module_name,
+                body.project_name,
+                state.config.mimo_console_package_timeout,
+            )
+        except (OSError, ValueError, StoreError) as exc:
+            logger.warning("[Mimo Console] GitHub 插件安装提交失败")
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.success(f"[Mimo Console] 已提交 GitHub 插件安装：{result['project_link']}")
+        return result
+
+    @router.get("/api/store/deployment")
+    async def package_deployment(
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        try:
+            result = await state.store.capabilities()
+            result["package_management"] = state.config.mimo_console_allow_package_management
+            result["github_install"] = state.config.mimo_console_allow_package_management and bool(
+                result.get("github_install", result.get("mode") == "docker-agent")
+            )
+            result["detection"] = state.deployment.as_dict()
+            return result
+        except (OSError, ValueError, StoreError) as exc:
+            if state.deployment.backend_mode == "docker-agent":
+                return {
+                    "mode": "docker-agent",
+                    "instance_id": state.config.mimo_console_instance_id,
+                    "available": False,
+                    "persistent_image": True,
+                    "rollback": False,
+                    "package_management": (state.config.mimo_console_allow_package_management),
+                    "github_install": False,
+                    "detection": state.deployment.as_dict(),
+                    "error": str(exc),
+                }
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @router.get("/api/store/operations")
+    async def package_operations(
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        try:
+            return {"items": await state.store.list_operations()}
+        except (OSError, ValueError, StoreError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @router.get("/api/store/operations/{operation_id}")
+    async def package_operation(
+        operation_id: str,
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        try:
+            operation = await state.store.get_operation(operation_id)
+        except (OSError, ValueError, StoreError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if operation is None:
+            raise HTTPException(status_code=404, detail="操作不存在")
+        return operation
+
+    @router.post("/api/store/operations/{operation_id}/rollback")
+    async def rollback_package_operation(
+        operation_id: str,
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        try:
+            return await state.store.rollback(operation_id)
+        except (OSError, ValueError, StoreError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.get("/api/store/plugins/{module_name}/readme")
     async def store_plugin_readme(
         module_name: str,
         session: Annotated[Session, Depends(require_session)],
     ) -> dict[str, Any]:
-        """Fetch the GitHub README for a store plugin and return raw Markdown."""
+        """Fetch and render the GitHub README for a store plugin."""
         if not state.config.mimo_console_enable_store:
             raise HTTPException(status_code=403, detail="官方插件商店已在配置中关闭")
         try:
@@ -266,46 +674,20 @@ def create_router(state: ConsoleState) -> APIRouter:
         homepage = (item or {}).get("homepage", "")
         if not homepage:
             return {"ok": False, "content": "", "detail": "该插件未提供主页链接"}
-        import re as _re
-
-        match = _re.match(r"https?://github\.com/([^/]+)/([^/?#]+)", homepage)
-        if not match:
-            return {"ok": False, "content": "", "detail": "主页不是 GitHub 仓库，无法获取 README"}
-        owner, repo = match.group(1), match.group(2).removesuffix(".git")
-        proxy = state.config.mimo_console_github_proxy
-        branches = ["main", "master"]
-        filenames = ["README.md", "readme.md", "README.rst", "README"]
-        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-            for branch in branches:
-                for filename in filenames:
-                    if proxy and not is_mirror_repo(proxy):
-                        raw_url = f"{proxy}https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{filename}"
-                    else:
-                        raw_url = (
-                            f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{filename}"
-                        )
-                    try:
-                        resp = await client.get(
-                            raw_url,
-                            headers={"User-Agent": PACKAGE_NAME},
-                        )
-                        if resp.status_code == 200:
-                            return {"ok": True, "content": resp.text, "detail": ""}
-                    except (httpx.HTTPError, OSError):
-                        continue
-        return {"ok": False, "content": "", "detail": "无法获取 README 文件"}
+        return await github_readme(homepage)
 
     @router.get("/api/config")
     async def get_config(
         session: Annotated[Session, Depends(require_session)],
     ) -> dict[str, Any]:
         environment = str(getattr(get_driver().config, "environment", "prod"))
-        path = locate_env_file(state.config.project_root(), environment)
-        items = await asyncio.to_thread(read_env, path)
-        return {
-            "path": str(path),
-            "items": [entry.__dict__ for entry in items],
-        }
+        try:
+            snapshot = await state.configuration.read_configuration(environment)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return snapshot.as_dict()
 
     @router.put("/api/config")
     async def save_config(
@@ -313,12 +695,46 @@ def create_router(state: ConsoleState) -> APIRouter:
         session: Annotated[Session, Depends(require_session)],
     ) -> dict[str, Any]:
         environment = str(getattr(get_driver().config, "environment", "prod"))
-        path = locate_env_file(state.config.project_root(), environment)
         try:
-            await asyncio.to_thread(update_env, path, body.values, state.backup_dir)
+            result = await state.configuration.update_configuration(
+                environment,
+                body.values,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"ok": True, "restart_required": True, "path": str(path)}
+        return result.as_dict()
+
+    @router.get("/api/config/backups")
+    async def config_backups(
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        environment = str(getattr(get_driver().config, "environment", "prod"))
+        try:
+            items = await state.configuration.list_configuration_backups(environment)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"items": [item.as_dict() for item in items]}
+
+    @router.post("/api/config/restore")
+    async def restore_config(
+        body: ConfigRestoreBody,
+        session: Annotated[Session, Depends(require_session)],
+    ) -> dict[str, Any]:
+        environment = str(getattr(get_driver().config, "environment", "prod"))
+        try:
+            result = await state.configuration.restore_configuration(
+                environment,
+                body.backup_id,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return result.as_dict()
 
     @router.get("/api/logs")
     async def logs(
@@ -337,6 +753,14 @@ def create_router(state: ConsoleState) -> APIRouter:
 
     def background_payload(snap: dict[str, Any]) -> dict[str, Any]:
         if snap["type"] == "url":
+            if snap["filename"]:
+                return {
+                    "source": "url",
+                    "url": (
+                        f"{state.config.mimo_console_path}/api/background/file/{snap['filename']}"
+                    ),
+                    "remote_url": snap["url"],
+                }
             return {"source": "url", "url": snap["url"]}
         if snap["type"] == "upload" and snap["filename"]:
             return {
@@ -355,7 +779,15 @@ def create_router(state: ConsoleState) -> APIRouter:
         session: Annotated[Session, Depends(require_session)],
     ) -> dict[str, Any]:
         try:
-            snap = await asyncio.to_thread(state.background.set_url, body.url)
+            async with background_lock:
+                filename, content_type, data = await download_background(body.url)
+                snap = await asyncio.to_thread(
+                    state.background.set_remote_download,
+                    body.url,
+                    filename,
+                    content_type,
+                    data,
+                )
         except BackgroundError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return background_payload(snap)
@@ -365,25 +797,27 @@ def create_router(state: ConsoleState) -> APIRouter:
         session: Annotated[Session, Depends(require_session)],
         file: UploadFile,
     ) -> dict[str, Any]:
-        data = await file.read()
-        if len(data) > MAX_BACKGROUND_BYTES:
-            raise HTTPException(status_code=413, detail="图片大小不能超过 5MB")
-        try:
-            snap = await asyncio.to_thread(
-                state.background.set_upload,
-                file.filename or "",
-                file.content_type or "",
-                data,
-            )
-        except BackgroundError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        async with background_lock:
+            data = await file.read()
+            if len(data) > MAX_BACKGROUND_BYTES:
+                raise HTTPException(status_code=413, detail="图片大小不能超过 5MB")
+            try:
+                snap = await asyncio.to_thread(
+                    state.background.set_upload,
+                    file.filename or "",
+                    file.content_type or "",
+                    data,
+                )
+            except BackgroundError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         return background_payload(snap)
 
     @router.delete("/api/background")
     async def clear_background(
         session: Annotated[Session, Depends(require_session)],
     ) -> dict[str, Any]:
-        snap = await asyncio.to_thread(state.background.clear)
+        async with background_lock:
+            snap = await asyncio.to_thread(state.background.clear)
         return background_payload(snap)
 
     @router.get("/api/background/file/{filename}")
@@ -423,11 +857,13 @@ def create_router(state: ConsoleState) -> APIRouter:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         environment = str(getattr(get_driver().config, "environment", "prod"))
-        path = locate_env_file(state.config.project_root(), environment)
         try:
-            await asyncio.to_thread(
-                update_env, path, {"MIMO_CONSOLE_GITHUB_PROXY": proxy}, state.backup_dir
+            await state.configuration.update_configuration(
+                environment,
+                {"MIMO_CONSOLE_GITHUB_PROXY": proxy},
             )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         # 热更新内存配置，无需重启即可生效
@@ -477,6 +913,15 @@ def create_router(state: ConsoleState) -> APIRouter:
     ) -> dict[str, Any]:
         if state.store.action_lock.locked():
             raise HTTPException(status_code=409, detail="另一个插件操作仍在进行中")
+        if state.deployment.backend_mode == "docker-agent":
+            try:
+                return await state.store.update_self(
+                    state.config.project_root(),
+                    PACKAGE_GIT_URL,
+                    state.config.mimo_console_package_timeout,
+                )
+            except (OSError, ValueError, StoreError) as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         command = build_self_update_command(
             state.config.project_root(),
             PACKAGE_NAME,
@@ -519,6 +964,11 @@ def create_router(state: ConsoleState) -> APIRouter:
     async def restart_nonebot(
         session: Annotated[Session, Depends(require_session)],
     ) -> dict[str, Any]:
+        if state.deployment.backend_mode == "docker-agent":
+            try:
+                return await state.store.restart()
+            except (OSError, ValueError, StoreError) as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         # 派一个 detached 子进程 watcher：当前进程退出、端口释放后，
         # watcher 用原启动命令重新执行，实现自重启——不依赖任何外部进程管理器。
         # 代价：新进程脱离原托管（如 MCSManager 面板会显示 stopped，但子进程在跑）。

@@ -6,6 +6,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "src" / "nonebot_plugin_mimo_console" / "background.py"
@@ -21,6 +24,7 @@ BackgroundStore = background.BackgroundStore
 normalize_background_url = background.normalize_background_url
 build_upload_filename = background.build_upload_filename
 is_safe_upload_filename = background.is_safe_upload_filename
+download_background = background.download_background
 
 
 class UrlValidationTests(unittest.TestCase):
@@ -29,10 +33,78 @@ class UrlValidationTests(unittest.TestCase):
             normalize_background_url("https://example.com/a.jpg"),
             "https://example.com/a.jpg",
         )
+
+
+class RemoteDownloadTests(unittest.IsolatedAsyncioTestCase):
+    async def test_downloads_supported_image_with_size_limit(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.host, "example.com")
+            return httpx.Response(
+                200,
+                headers={"Content-Type": "image/png", "Content-Length": "12"},
+                content=b"\x89PNG\r\n\x1a\nDATA",
+            )
+
+        with patch.object(
+            background,
+            "_ensure_public_host",
+            AsyncMock(return_value=None),
+        ):
+            name, mime, data = await download_background(
+                "https://example.com/wall.png",
+                transport=httpx.MockTransport(handler),
+            )
+        self.assertEqual(name, "wall.png")
+        self.assertEqual(mime, "image/png")
+        self.assertEqual(data, b"\x89PNG\r\n\x1a\nDATA")
+
+    async def test_revalidates_redirect_destination(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                302,
+                headers={"Location": "http://127.0.0.1/private.png"},
+                request=request,
+            )
+
+        validation = AsyncMock(
+            side_effect=[None, BackgroundError("背景图片地址不能指向本机或内网")]
+        )
+        with (
+            patch.object(background, "_ensure_public_host", validation),
+            self.assertRaises(BackgroundError),
+        ):
+            await download_background(
+                "https://example.com/redirect",
+                transport=httpx.MockTransport(handler),
+            )
+        self.assertEqual(validation.await_count, 2)
         self.assertEqual(
             normalize_background_url("http://example.com/b.png"),
             "http://example.com/b.png",
         )
+
+    async def test_retries_all_validated_addresses(self) -> None:
+        request = httpx.Request("GET", "https://example.com/wall.png")
+        candidate = AsyncMock(
+            side_effect=[
+                httpx.ConnectError("IPv6 unavailable", request=request),
+                (None, ("wall.png", "image/png", b"\x89PNG\r\n\x1a\nDATA")),
+            ]
+        )
+        with (
+            patch.object(
+                background,
+                "_ensure_public_host",
+                AsyncMock(return_value=["2001:4860:4860::8888", "8.8.8.8"]),
+            ),
+            patch.object(background, "_download_candidate", candidate),
+        ):
+            result = await download_background("https://example.com/wall.png")
+
+        self.assertEqual(result[0], "wall.png")
+        self.assertEqual(candidate.await_count, 2)
+        self.assertEqual(candidate.await_args_list[0].args[2], "2001:4860:4860::8888")
+        self.assertEqual(candidate.await_args_list[1].args[2], "8.8.8.8")
 
     def test_rejects_non_http_schemes(self) -> None:
         for value in (
@@ -137,6 +209,20 @@ class BackgroundStoreTests(unittest.TestCase):
             store = BackgroundStore(Path(temp) / "bg.json", Path(temp) / "imgs")
             with self.assertRaises(BackgroundError):
                 store.set_upload("a.exe", "application/octet-stream", b"x" * 16)
+
+    def test_remote_download_keeps_url_source_and_cached_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            image_dir = Path(temp) / "imgs"
+            store = BackgroundStore(Path(temp) / "bg.json", image_dir)
+            snap = store.set_remote_download(
+                "https://example.com/wall.png",
+                "wall.png",
+                "image/png",
+                b"\x89PNG\r\n\x1a\nDATA",
+            )
+            self.assertEqual(snap["type"], "url")
+            self.assertEqual(snap["url"], "https://example.com/wall.png")
+            self.assertTrue((image_dir / snap["filename"]).is_file())
 
     def test_clear_removes_upload_and_resets(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

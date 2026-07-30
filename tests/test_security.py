@@ -46,6 +46,26 @@ class SecurityTests(unittest.TestCase):
             with self.assertRaises(AuthError):
                 store.setup("wrong-token", "admin", "StrongPass1@")
 
+    def test_session_survives_store_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "auth.json"
+            store = AuthStore(path, session_hours=1)
+            setup_token = store.issue_setup_token()
+            session_token = store.setup(
+                str(setup_token),
+                "admin",
+                "StrongPass1@",
+            )
+
+            restarted = AuthStore(path, session_hours=1)
+            session = restarted.verify(session_token)
+            self.assertIsNotNone(session)
+            assert session is not None
+            self.assertEqual(session.username, "admin")
+
+            restarted.logout(session_token)
+            self.assertIsNone(AuthStore(path, session_hours=1).verify(session_token))
+
 
 if __name__ == "__main__":
     unittest.main()
