@@ -127,5 +127,13 @@ uv build
 ```
 
 项目使用 GPL-3.0 协议。
+
 ## 致谢
->感谢[M](https://github.com/yiwuerxin) 
+
+感谢所有参与 Mimo Console 开发、测试与改进的贡献者：
+
+- [MimoKit](https://github.com/MimoKit)
+- [M / yiwuerxin](https://github.com/yiwuerxin)
+- [spaxie](https://github.com/spaxie)
+- [syuan326](https://github.com/syuan326)
+- [gufei233](https://github.com/gufei233)
