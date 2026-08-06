@@ -674,17 +674,29 @@ async function openLoadedDetail(item) {
       <div class="empty-state compact">${item.loaded === false ? "插件未加载，暂无运行时配置可编辑" : "正在读取配置…"}</div>
     </div>
   `;
-  $("#detail-actions").innerHTML = [
-    state.packageManagement
-      && item.source_repository
-      && item.module !== "nonebot_plugin_mimo_console"
-      ? `<button class="btn btn-primary" type="button" data-source-plugin-action="update">更新源码插件</button>
-         <button class="btn btn-danger" type="button" data-source-plugin-action="uninstall">卸载源码插件</button>`
-      : "",
-    homepage ? `<a class="btn btn-ghost" href="${homepage}" target="_blank" rel="noreferrer">打开主页</a>` : "",
-  ].join("");
+  const isSelf = item.module === "nonebot_plugin_mimo_console";
+  const loadedActions = [];
+  if (state.packageManagement && !isSelf) {
+    if (item.source_repository) {
+      loadedActions.push(
+        `<button class="btn btn-primary" type="button" data-source-plugin-action="update">更新源码插件</button>
+         <button class="btn btn-danger" type="button" data-source-plugin-action="uninstall">卸载源码插件</button>`,
+      );
+    } else if (item.distribution) {
+      loadedActions.push(
+        `<button class="btn btn-danger" type="button" data-loaded-plugin-action="uninstall" data-plugin-distribution="${escapeHtml(item.distribution)}">卸载</button>`,
+      );
+    }
+  }
+  if (homepage) {
+    loadedActions.push(`<a class="btn btn-ghost" href="${homepage}" target="_blank" rel="noreferrer">打开主页</a>`);
+  }
+  $("#detail-actions").innerHTML = loadedActions.join("");
   $$("[data-source-plugin-action]", $("#detail-actions")).forEach((button) => {
     button.addEventListener("click", () => manageLoadedSourcePlugin(item, button));
+  });
+  $$("[data-loaded-plugin-action]", $("#detail-actions")).forEach((button) => {
+    button.addEventListener("click", () => manageLoadedDependencyPlugin(item, button));
   });
   showDetail(true);
   loadPluginReadme(item.name || item.module, "loaded");
@@ -718,6 +730,36 @@ async function manageLoadedSourcePlugin(item, button) {
       throw new Error(result.error || `${label}失败`);
     }
     toast(`${item.title || item.name} 已${label}`, "success");
+    closeDetail();
+    await loadPlugins();
+  } catch (error) {
+    toast(error.message, "error");
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+async function manageLoadedDependencyPlugin(item, button) {
+  const action = button.dataset.loadedPluginAction;
+  const distribution = button.dataset.pluginDistribution;
+  const label = action === "update" ? "更新" : "卸载";
+  if (!distribution) return;
+  if (!window.confirm(`确定${label}「${item.title || item.name}」吗？完成后需要重启 NoneBot 生效。`)) return;
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = `${label}中…`;
+  try {
+    let result = await api(`/dependencies/${encodeURIComponent(distribution)}/action`, {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    });
+    if (result.status && !["succeeded", "failed", "rolled_back"].includes(result.status)) {
+      result = await waitPackageOperation(result, button, label);
+    }
+    if (result.status === "failed" || result.status === "rolled_back") {
+      throw new Error(result.error || `${label}失败`);
+    }
+    toast(`${item.title || item.name} 已${label}，重启 NoneBot 后生效`, "success");
     closeDetail();
     await loadPlugins();
   } catch (error) {
